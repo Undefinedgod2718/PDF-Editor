@@ -8,6 +8,10 @@ target/
 # Runtime uploads
 server/data/
 
+# Docs (local only)
+README.md
+wiki/
+
 # Logs / OS / editors
 *.log
 .DS_Store
