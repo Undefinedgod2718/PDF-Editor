@@ -1,11 +1,57 @@
 //! PDFium is not thread-safe, so all PDFium work runs on one dedicated
 //! worker thread. Requests are sent as boxed closures over a channel and
 //! answered through oneshot channels.
+//!
+//! The worker also owns a small LRU cache of open documents so read
+//! endpoints (render, text, search, …) don't re-parse the PDF on every
+//! request. Mutating endpoints must call [`DocCache::invalidate`] after
+//! rewriting the file.
 
+use std::num::NonZeroUsize;
+use std::path::{Path, PathBuf};
+
+use lru::LruCache;
 use pdfium_render::prelude::*;
 use tokio::sync::{mpsc, oneshot};
 
-type Job = Box<dyn FnOnce(&Pdfium) + Send>;
+/// Documents the worker keeps open, keyed by file path.
+///
+/// Entries are loaded from an owned byte buffer — never from an open file
+/// handle — so a mutation can atomically rename over the underlying path
+/// (see `with_document`) while a cached copy of the old bytes still exists.
+pub struct DocCache {
+    docs: LruCache<PathBuf, PdfDocument<'static>>,
+}
+
+impl DocCache {
+    fn new() -> Self {
+        Self {
+            // Each entry holds the whole file in memory, so keep this small.
+            docs: LruCache::new(NonZeroUsize::new(8).unwrap()),
+        }
+    }
+
+    /// Return the cached document for `path`, loading and caching it on miss.
+    pub fn open(
+        &mut self,
+        pdfium: &'static Pdfium,
+        path: &Path,
+    ) -> anyhow::Result<&mut PdfDocument<'static>> {
+        if !self.docs.contains(path) {
+            let bytes = std::fs::read(path)?;
+            let doc = pdfium.load_pdf_from_byte_vec(bytes, None)?;
+            self.docs.put(path.to_path_buf(), doc);
+        }
+        Ok(self.docs.get_mut(path).expect("just inserted"))
+    }
+
+    /// Drop the cached copy after the file at `path` has been rewritten.
+    pub fn invalidate(&mut self, path: &Path) {
+        self.docs.pop(path);
+    }
+}
+
+type Job = Box<dyn FnOnce(&'static Pdfium, &mut DocCache) + Send>;
 
 pub struct PdfEngine {
     tx: mpsc::UnboundedSender<Job>,
@@ -27,7 +73,10 @@ impl PdfEngine {
                 let pdfium = match bindings {
                     Ok(b) => {
                         let _ = ready_tx.send(Ok(()));
-                        Pdfium::new(b)
+                        // Leaked so cached documents can borrow it as 'static.
+                        // One instance per process, alive for the process
+                        // lifetime anyway.
+                        &*Box::leak(Box::new(Pdfium::new(b)))
                     }
                     Err(e) => {
                         let _ = ready_tx.send(Err(e.to_string()));
@@ -35,8 +84,9 @@ impl PdfEngine {
                     }
                 };
 
+                let mut cache = DocCache::new();
                 while let Some(job) = rx.blocking_recv() {
-                    job(&pdfium);
+                    job(pdfium, &mut cache);
                 }
             })?;
 
@@ -51,12 +101,12 @@ impl PdfEngine {
     pub async fn run<T, F>(&self, f: F) -> anyhow::Result<T>
     where
         T: Send + 'static,
-        F: FnOnce(&Pdfium) -> anyhow::Result<T> + Send + 'static,
+        F: FnOnce(&'static Pdfium, &mut DocCache) -> anyhow::Result<T> + Send + 'static,
     {
         let (tx, rx) = oneshot::channel();
         self.tx
-            .send(Box::new(move |pdfium| {
-                let _ = tx.send(f(pdfium));
+            .send(Box::new(move |pdfium, cache| {
+                let _ = tx.send(f(pdfium, cache));
             }))
             .map_err(|_| anyhow::anyhow!("pdfium worker thread is gone"))?;
         rx.await?

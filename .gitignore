@@ -8,6 +8,10 @@ target/
 # Runtime uploads
 server/data/
 
+# Deploy staging / Windows service helper (binaries, built dist)
+deploy/stage/
+deploy/*.exe
+
 # Docs (local only)
 README.md
 wiki/

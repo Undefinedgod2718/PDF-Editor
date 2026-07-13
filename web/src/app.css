@@ -162,14 +162,39 @@ body,
 /* ---------- thumbnails ---------- */
 .thumb-panel {
   width: 200px;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
   background: var(--bg-panel);
   border-right: 1px solid var(--border);
+  min-height: 0;
+}
+
+.thumb-list {
+  flex: 1;
+  overflow-y: auto;
   padding: 12px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 12px;
+}
+
+.thumb-panel-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.thumb-panel-actions .tb-btn {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 12px;
+}
+
+.thumb-panel-actions .tb-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .thumb {
@@ -189,6 +214,10 @@ body,
   border-color: var(--accent);
 }
 
+.thumb.thumb-drop-target {
+  border-color: #ff8c00;
+}
+
 .thumb-label {
   position: absolute;
   bottom: -2px;
@@ -198,6 +227,33 @@ body,
   line-height: 1;
   padding: 3px 6px;
   border-radius: 3px;
+}
+
+.thumb-toolbar {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.1s;
+  z-index: 2;
+}
+
+.thumb:hover .thumb-toolbar {
+  opacity: 1;
+}
+
+.thumb-tool-btn {
+  min-width: 22px;
+  height: 22px;
+  font-size: 12px;
+  background: rgba(0, 0, 0, 0.65);
+  border-radius: 3px;
+}
+
+.thumb-tool-btn:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.85);
 }
 
 /* ---------- viewer ---------- */
@@ -511,4 +567,338 @@ body,
 
 .annot-item-del {
   flex-shrink: 0;
+}
+
+/* ---------- modal dialogs (合併/擷取) ---------- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.modal {
+  width: 380px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+}
+
+.modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.modal-subtitle {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 4px;
+}
+
+.modal-input {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-dark);
+  color: var(--text);
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.doc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 160px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px;
+}
+
+.doc-list-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  font-size: 13px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.doc-list-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.doc-list-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-list-current {
+  font-size: 11px;
+  color: var(--accent);
+}
+
+.doc-order-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.doc-order-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 6px;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 4px;
+}
+
+.doc-order-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-order-actions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.doc-order-actions .tb-btn {
+  min-width: 24px;
+  height: 24px;
+  font-size: 11px;
+}
+
+/* ---------- stamp drawer ---------- */
+.stamp-drawer-error {
+  margin: 8px 10px 0;
+}
+
+.stamp-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  padding: 10px;
+}
+
+.stamp-item {
+  position: relative;
+  cursor: pointer;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  padding: 6px;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 60px;
+}
+
+.stamp-item.active {
+  border-color: var(--accent);
+}
+
+.stamp-item img {
+  max-width: 100%;
+  max-height: 64px;
+  display: block;
+}
+
+.stamp-item-del {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 20px;
+  height: 20px;
+  font-size: 11px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.stamp-item:hover .stamp-item-del {
+  opacity: 1;
+}
+
+/* ---------- 繪圖模式（Excalidraw）---------- */
+.drawing-modal-overlay {
+  z-index: 100;
+}
+
+.drawing-modal {
+  width: 96vw;
+  height: 92vh;
+  max-height: 92vh;
+}
+
+.drawing-modal-error {
+  margin-right: 8px;
+  font-size: 12px;
+}
+
+.drawing-modal-body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.drawing-modal-body .excalidraw {
+  height: 100%;
+  width: 100%;
+}
+
+/* ---------- 表單填寫層（form 工具）---------- */
+.form-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.form-field {
+  position: absolute;
+  box-sizing: border-box;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.form-field-text {
+  pointer-events: auto;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1.5px solid var(--accent);
+  border-radius: 2px;
+  padding: 2px 4px;
+  color: #111;
+}
+
+.form-field-text:focus {
+  outline: none;
+  background: rgba(255, 255, 255, 0.95);
+  border-color: #ff8c00;
+}
+
+.form-field-checkbox,
+.form-field-radio {
+  pointer-events: auto;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid var(--accent);
+  background: rgba(76, 141, 255, 0.12);
+  color: var(--accent);
+  font-weight: bold;
+  line-height: 1;
+}
+
+.form-field-radio {
+  border-radius: 50%;
+}
+
+.form-field-checkbox.checked,
+.form-field-radio.checked {
+  background: rgba(76, 141, 255, 0.4);
+  color: #0d47a1;
+}
+
+.form-field-readonly {
+  pointer-events: auto;
+  cursor: not-allowed;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px dashed var(--text-dim);
+  background: rgba(154, 160, 166, 0.15);
+  color: var(--text-dim);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 2px;
+}
+
+/* ---------- 簽名板 ---------- */
+.signature-modal {
+  width: auto;
+}
+
+.signature-pad-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+
+.signature-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.signature-canvas-wrap {
+  align-self: center;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  background-color: #fff;
+  background-image:
+    linear-gradient(45deg, #eee 25%, transparent 25%),
+    linear-gradient(-45deg, #eee 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #eee 75%),
+    linear-gradient(-45deg, transparent 75%, #eee 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+
+.signature-canvas-wrap canvas {
+  display: block;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+/* ---------- 文字物件編輯（editText 工具）---------- */
+.text-obj-box {
+  position: absolute;
+  border: 1px dashed rgba(76, 141, 255, 0.75);
+  background: rgba(76, 141, 255, 0.08);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.text-obj-box:hover {
+  background: rgba(76, 141, 255, 0.2);
 }

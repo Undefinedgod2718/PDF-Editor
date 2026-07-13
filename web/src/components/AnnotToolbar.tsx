@@ -9,6 +9,11 @@ export type AnnotTool =
   | 'note'
   | 'ink'
   | 'freeText'
+  | 'stamp'
+  | 'editText'
+  | 'draw'
+  | 'form'
+  | 'sign'
 
 interface Props {
   tool: AnnotTool
@@ -19,6 +24,8 @@ interface Props {
   setInkWidth: (w: number) => void
   showAnnotPanel: boolean
   toggleAnnotPanel: () => void
+  /** 表單欄位已載入且該文件沒有任何欄位時為 true，顯示提示。 */
+  noFormFields: boolean
 }
 
 const TOOLS: { id: AnnotTool; icon: string; title: string }[] = [
@@ -30,6 +37,11 @@ const TOOLS: { id: AnnotTool; icon: string; title: string }[] = [
   { id: 'note', icon: '📝', title: '便籤' },
   { id: 'ink', icon: '✏️', title: '手繪' },
   { id: 'freeText', icon: '🔤', title: '文字框' },
+  { id: 'stamp', icon: '🖃', title: '印章' },
+  { id: 'editText', icon: '✎', title: '編輯文字' },
+  { id: 'draw', icon: '🎨', title: '繪圖' },
+  { id: 'form', icon: '📋', title: '表單' },
+  { id: 'sign', icon: '✍', title: '簽名' },
 ]
 
 const PALETTE: Color[] = [
@@ -70,6 +82,7 @@ export default function AnnotToolbar({
   setInkWidth,
   showAnnotPanel,
   toggleAnnotPanel,
+  noFormFields,
 }: Props) {
   return (
     <div className="annot-toolbar">
@@ -120,9 +133,9 @@ export default function AnnotToolbar({
         </div>
       )}
 
-      {tool === 'freeText' && (
-        <div className="annot-hint">文字框暫僅支援英數（後端字型不支援中文）</div>
-      )}
+      {tool === 'stamp' && <div className="annot-hint">請先在印章庫選擇印章，再於頁面拖曳出印章範圍</div>}
+
+      {tool === 'form' && noFormFields && <div className="annot-hint">此文件無表單欄位</div>}
 
       <div className="toolbar-group" style={{ marginLeft: 'auto' }}>
         <button

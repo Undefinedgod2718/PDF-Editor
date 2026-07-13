@@ -18,6 +18,10 @@ urlencoding = "2"
 anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+ttf-parser = "0.25.1"
+subsetter = "0.2.6"
+lopdf = "0.44.0"
+lru = "0.12"
 
 [profile.release]
 lto = true

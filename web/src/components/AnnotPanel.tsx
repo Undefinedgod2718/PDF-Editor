@@ -42,9 +42,10 @@ export default function AnnotPanel({ doc, currentPage, version, onDeleted, onSel
     }
   }, [doc.id, currentPage, version])
 
-  const remove = async (index: number) => {
+  const remove = async (it: AnnotationInfo) => {
     try {
-      await deleteAnnotation(doc.id, currentPage, index)
+      // nm 是穩定 ID；舊註解（導入 /NM 前建立）才退回 index。
+      await deleteAnnotation(doc.id, currentPage, it.nm ?? String(it.index))
       onDeleted(currentPage)
     } catch (err) {
       console.error('deleteAnnotation failed:', err)
@@ -64,7 +65,7 @@ export default function AnnotPanel({ doc, currentPage, version, onDeleted, onSel
         {!loading && items.length === 0 && <div className="annot-empty">此頁尚無註解</div>}
         {items.map((it) => (
           <div
-            key={it.index}
+            key={it.nm ?? it.index}
             className="annot-item"
             onClick={() => it.rect && onSelect(currentPage, it.rect)}
           >
@@ -83,7 +84,7 @@ export default function AnnotPanel({ doc, currentPage, version, onDeleted, onSel
               title="刪除"
               onClick={(e) => {
                 e.stopPropagation()
-                void remove(it.index)
+                void remove(it)
               }}
             >
               🗑

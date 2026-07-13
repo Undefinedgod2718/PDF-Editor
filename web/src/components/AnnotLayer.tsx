@@ -1,5 +1,15 @@
-import { useRef, useState } from 'react'
-import { createAnnotation, type CharBox, type Color, type Rect } from '../api'
+import { useEffect, useRef, useState } from 'react'
+import {
+  createAnnotation,
+  deletePageObject,
+  editPageObject,
+  listPageObjects,
+  type CharBox,
+  type Color,
+  type Rect,
+  type StampMeta,
+  type TextObjectInfo,
+} from '../api'
 import { selectionToLineRects } from '../lib/annotGeom'
 import type { AnnotTool } from './AnnotToolbar'
 
@@ -25,6 +35,9 @@ interface Props {
   tool: AnnotTool
   color: Color
   inkWidth: number
+  stamp: StampMeta | null
+  /** 該頁目前的版本號（每次註解/結構變更會 +1），用來觸發文字物件重新 fetch。 */
+  version: number
   getPageChars: (page: number) => Promise<CharBox[]>
   onChanged: () => void
   flashRect: Rect | null
@@ -32,6 +45,9 @@ interface Props {
 }
 
 const TEXT_TOOLS: AnnotTool[] = ['highlight', 'underline', 'strikeout', 'squiggly']
+
+/** 這些工具不使用 AnnotLayer 的拖曳/繪製互動（表單填寫、簽名皆有自己的 UI）。 */
+const PASSIVE_TOOLS: AnnotTool[] = ['select', 'editText', 'form', 'sign']
 
 function pxRect(a: PxPoint, b: PxPoint) {
   return {
@@ -51,6 +67,21 @@ function colorForCreate(tool: AnnotTool, c: Color): Color {
   return tool === 'highlight' ? { ...c, a: 150 } : c
 }
 
+/** 在拖曳矩形內，依 aspect（寬/高）取最大等比尺寸，靠拖曳矩形左上角對齊。 */
+function fitAspect(box: Rect, aspect: number): Rect {
+  const boxAspect = box.w / box.h
+  let w: number
+  let h: number
+  if (boxAspect > aspect) {
+    h = box.h
+    w = h * aspect
+  } else {
+    w = box.w
+    h = w / aspect
+  }
+  return { x: box.x, y: box.y, w, h }
+}
+
 export default function AnnotLayer({
   docId,
   page,
@@ -58,6 +89,8 @@ export default function AnnotLayer({
   tool,
   color,
   inkWidth,
+  stamp,
+  version,
   getPageChars,
   onChanged,
   flashRect,
@@ -75,6 +108,27 @@ export default function AnnotLayer({
   const [freeTextValue, setFreeTextValue] = useState('')
   const [freeTextSize, setFreeTextSize] = useState(14)
 
+  const [objects, setObjects] = useState<TextObjectInfo[]>([])
+  const [editPopup, setEditPopup] = useState<{ index: number; rectPx: Rect } | null>(null)
+  const [editValue, setEditValue] = useState('')
+
+  // 「編輯文字」工具啟用時（或該頁版本變動，如編輯/刪除物件後）重新抓該頁文字物件。
+  useEffect(() => {
+    if (tool !== 'editText') {
+      setObjects([])
+      return
+    }
+    let cancelled = false
+    listPageObjects(docId, page)
+      .then((res) => {
+        if (!cancelled) setObjects(res)
+      })
+      .catch((err) => console.error('listPageObjects failed:', err))
+    return () => {
+      cancelled = true
+    }
+  }, [tool, docId, page, version])
+
   const isTextTool = TEXT_TOOLS.includes(tool)
 
   const localPoint = (e: { clientX: number; clientY: number }): PxPoint => {
@@ -88,7 +142,7 @@ export default function AnnotLayer({
     (e.target as HTMLElement).closest('.annot-popup') !== null
 
   const onPointerDown = (e: React.PointerEvent) => {
-    if (tool === 'select' || fromPopup(e)) return
+    if (PASSIVE_TOOLS.includes(tool) || fromPopup(e)) return
     const p = localPoint(e)
     if (tool === 'note') {
       // Popup opens on pointer-up: opening on pointer-down lets the
@@ -97,7 +151,7 @@ export default function AnnotLayer({
       return
     }
     overlayRef.current?.setPointerCapture(e.pointerId)
-    if (isTextTool || tool === 'freeText') {
+    if (isTextTool || tool === 'freeText' || (tool === 'stamp' && stamp)) {
       setDragStart(p)
       setDragCur(p)
     } else if (tool === 'ink') {
@@ -106,9 +160,9 @@ export default function AnnotLayer({
   }
 
   const onPointerMove = (e: React.PointerEvent) => {
-    if (tool === 'select' || fromPopup(e)) return
+    if (PASSIVE_TOOLS.includes(tool) || fromPopup(e)) return
     const p = localPoint(e)
-    if ((isTextTool || tool === 'freeText') && dragStart) {
+    if ((isTextTool || tool === 'freeText' || (tool === 'stamp' && stamp)) && dragStart) {
       setDragCur(p)
     } else if (tool === 'ink' && inkPts.length > 0) {
       setInkPts((pts) => [...pts, p])
@@ -116,7 +170,7 @@ export default function AnnotLayer({
   }
 
   const onPointerUp = async (e: React.PointerEvent) => {
-    if (tool === 'select' || fromPopup(e)) return
+    if (PASSIVE_TOOLS.includes(tool) || fromPopup(e)) return
     try {
       overlayRef.current?.releasePointerCapture(e.pointerId)
     } catch {
@@ -127,6 +181,25 @@ export default function AnnotLayer({
       const p = localPoint(e)
       setNotePopup({ xPx: p.x, yPx: p.y, xPt: p.x / scale, yPt: p.y / scale })
       setNoteText('')
+      return
+    }
+
+    if (tool === 'stamp' && stamp && dragStart && dragCur) {
+      const selPx = pxRect(dragStart, dragCur)
+      setDragStart(null)
+      setDragCur(null)
+      if (selPx.w < 5 || selPx.h < 5) return
+      const fittedPx = fitAspect(selPx, stamp.width / stamp.height)
+      const rectPt: Rect = {
+        x: fittedPx.x / scale,
+        y: fittedPx.y / scale,
+        w: fittedPx.w / scale,
+        h: fittedPx.h / scale,
+      }
+      await tryCreate(
+        () => createAnnotation(docId, page, { type: 'stamp', rect: rectPt, stampId: stamp.id }),
+        onChanged,
+      )
       return
     }
 
@@ -217,12 +290,48 @@ export default function AnnotLayer({
     )
   }
 
+  const openEditPopup = (obj: TextObjectInfo, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setEditPopup({
+      index: obj.index,
+      rectPx: { x: obj.x * scale, y: obj.y * scale, w: obj.w * scale, h: obj.h * scale },
+    })
+    setEditValue(obj.text)
+  }
+
+  const submitEditText = async () => {
+    if (!editPopup) return
+    const index = editPopup.index
+    const text = editValue
+    setEditPopup(null)
+    try {
+      await editPageObject(docId, page, index, text)
+      onChanged()
+    } catch (err) {
+      console.error('editPageObject failed:', err)
+    }
+  }
+
+  const deleteEditText = async () => {
+    if (!editPopup) return
+    const index = editPopup.index
+    setEditPopup(null)
+    try {
+      await deletePageObject(docId, page, index)
+      onChanged()
+    } catch (err) {
+      console.error('deletePageObject failed:', err)
+    }
+  }
+
   const dragPreviewPx = dragStart && dragCur ? pxRect(dragStart, dragCur) : null
+  const stampPreviewPx =
+    tool === 'stamp' && stamp && dragPreviewPx ? fitAspect(dragPreviewPx, stamp.width / stamp.height) : null
 
   return (
     <div
       ref={overlayRef}
-      className={`annot-layer ${tool !== 'select' ? 'annot-layer-active' : ''}`}
+      className={`annot-layer ${!PASSIVE_TOOLS.includes(tool) ? 'annot-layer-active' : ''}`}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={(e) => void onPointerUp(e)}
@@ -240,6 +349,30 @@ export default function AnnotLayer({
           }}
         />
       )}
+
+      {stampPreviewPx && (
+        <div
+          className="annot-drag-preview"
+          style={{
+            left: stampPreviewPx.x,
+            top: stampPreviewPx.y,
+            width: stampPreviewPx.w,
+            height: stampPreviewPx.h,
+            borderColor: 'rgba(76,141,255,0.9)',
+          }}
+        />
+      )}
+
+      {tool === 'editText' &&
+        objects.map((o) => (
+          <div
+            key={o.index}
+            className="text-obj-box"
+            style={{ left: o.x * scale, top: o.y * scale, width: o.w * scale, height: o.h * scale }}
+            title={o.text}
+            onClick={(e) => openEditPopup(o, e)}
+          />
+        ))}
 
       {inkPts.length > 1 && (
         <svg className="annot-ink-svg">
@@ -283,7 +416,7 @@ export default function AnnotLayer({
         >
           <textarea
             autoFocus
-            placeholder="輸入文字（僅支援英數）…"
+            placeholder="輸入文字…"
             value={freeTextValue}
             onChange={(e) => setFreeTextValue(e.target.value)}
             onKeyDown={(e) => {
@@ -301,6 +434,34 @@ export default function AnnotLayer({
               確定
             </button>
             <button className="tb-btn" onClick={() => setFreeTextPopup(null)}>
+              取消
+            </button>
+          </div>
+        </div>
+      )}
+
+      {editPopup && (
+        <div
+          className="annot-popup"
+          style={{ left: editPopup.rectPx.x, top: editPopup.rectPx.y + editPopup.rectPx.h + 4 }}
+        >
+          <textarea
+            autoFocus
+            placeholder="輸入文字…"
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') setEditPopup(null)
+            }}
+          />
+          <div className="annot-popup-actions">
+            <button className="tb-btn" onClick={() => void submitEditText()}>
+              確定
+            </button>
+            <button className="tb-btn" onClick={() => void deleteEditText()}>
+              刪除
+            </button>
+            <button className="tb-btn" onClick={() => setEditPopup(null)}>
               取消
             </button>
           </div>

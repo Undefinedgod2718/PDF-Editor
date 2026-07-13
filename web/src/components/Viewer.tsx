@@ -5,8 +5,9 @@ import {
   useImperativeHandle,
   useRef,
 } from 'react'
-import { fetchPageText, renderUrl, type CharBox, type Color, type DocInfo, type Rect, type SearchHit } from '../api'
+import { fetchPageText, renderUrl, type CharBox, type Color, type DocInfo, type FormField, type Rect, type SearchHit, type StampMeta } from '../api'
 import AnnotLayer from './AnnotLayer'
+import FormLayer from './FormLayer'
 import type { AnnotTool } from './AnnotToolbar'
 
 interface FlashTarget {
@@ -24,9 +25,12 @@ interface Props {
   tool: AnnotTool
   color: Color
   inkWidth: number
+  stamp: StampMeta | null
   pageVersions: Record<number, number>
   onAnnotationChanged: (page: number) => void
   flash: FlashTarget | null
+  formFields: FormField[]
+  onFormFieldChanged: (page: number) => void
 }
 
 export interface ViewerHandle {
@@ -35,7 +39,22 @@ export interface ViewerHandle {
 }
 
 const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(
-  { doc, scale, hits, activeHit, onCurrentPageChange, tool, color, inkWidth, pageVersions, onAnnotationChanged, flash },
+  {
+    doc,
+    scale,
+    hits,
+    activeHit,
+    onCurrentPageChange,
+    tool,
+    color,
+    inkWidth,
+    stamp,
+    pageVersions,
+    onAnnotationChanged,
+    flash,
+    formFields,
+    onFormFieldChanged,
+  },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -140,11 +159,21 @@ const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(
               tool={tool}
               color={color}
               inkWidth={inkWidth}
+              stamp={stamp}
+              version={pageVersions[page.index] ?? 0}
               getPageChars={getPageChars}
               onChanged={() => onAnnotationChanged(page.index)}
               flashRect={flash && flash.page === page.index ? flash.rect : null}
               flashKey={flash?.key ?? 0}
             />
+            {tool === 'form' && (
+              <FormLayer
+                docId={doc.id}
+                scale={scale}
+                fields={formFields.filter((f) => f.page === page.index)}
+                onFieldChanged={onFormFieldChanged}
+              />
+            )}
           </div>
         )
       })}

@@ -91,12 +91,20 @@ pub enum NewAnnotation {
     },
     /// Text box drawn directly on the page (stored as a Stamp annotation,
     /// see module docs).
+    #[serde(rename_all = "camelCase")]
     FreeText {
         rect: InRect,
         contents: String,
         color: InColor,
         #[serde(default = "default_font_size")]
         font_size: f32,
+    },
+    /// Image stamp from the stamp library; the PNG (alpha preserved) is
+    /// resolved by the API layer and passed to [create] separately.
+    #[serde(rename_all = "camelCase")]
+    Stamp {
+        rect: InRect,
+        stamp_id: uuid::Uuid,
     },
 }
 
@@ -107,6 +115,11 @@ fn default_font_size() -> f32 {
 #[derive(Serialize)]
 pub struct AnnotationInfo {
     pub index: usize,
+    /// Stable id from the annotation's /NM entry (PDF 32000-1 12.5.2).
+    /// Preferred over `index` for deletion: indices shift when an earlier
+    /// annotation on the page is removed. `None` only for annotations
+    /// created before /NM stamping was introduced.
+    pub nm: Option<String>,
     #[serde(rename = "type")]
     pub kind: String,
     pub rect: Option<OutRect>,
@@ -156,24 +169,7 @@ fn union_rects(rects: &[InRect]) -> InRect {
     }
 }
 
-/// Load, mutate, and atomically save the document back to `path`.
-/// The document is loaded from an owned byte buffer so no file handle
-/// is held while we overwrite the file.
-fn with_document<T>(
-    pdfium: &Pdfium,
-    path: &Path,
-    f: impl FnOnce(&mut PdfDocument) -> anyhow::Result<T>,
-) -> anyhow::Result<T> {
-    let bytes = std::fs::read(path)?;
-    let mut doc = pdfium.load_pdf_from_byte_vec(bytes, None)?;
-    let result = f(&mut doc)?;
-    let saved = doc.save_to_bytes()?;
-    drop(doc);
-    let tmp = path.with_extension("pdf.tmp");
-    std::fs::write(&tmp, &saved)?;
-    std::fs::rename(&tmp, path)?;
-    Ok(result)
-}
+use super::with_document;
 
 /// Quad points + bounds + colour + optional popup text, shared by the four
 /// text-markup subtypes. A macro because the concrete annotation types share
@@ -216,10 +212,29 @@ pub fn create(
     path: &Path,
     page_index: u16,
     ann: &NewAnnotation,
+    stamp_image: Option<image::DynamicImage>,
 ) -> anyhow::Result<usize> {
     with_document(pdfium, path, |doc| {
         // Font token must be taken before the page borrows the document.
-        let font = doc.fonts_mut().helvetica();
+        // CJK-capable font preferred (GenSen Rounded TW, SIL OFL), subset to
+        // just the glyphs this annotation uses so the file stays small; fall
+        // back to built-in Helvetica (ASCII only) when unavailable.
+        let font = match ann {
+            NewAnnotation::FreeText { contents, .. } => super::font::full_font_bytes()
+                .and_then(|full| {
+                    super::font::subset_for_text(full, contents)
+                        .map_err(|e| tracing::warn!("font subset failed: {e}"))
+                        .ok()
+                })
+                .and_then(|subset| {
+                    doc.fonts_mut()
+                        .load_true_type_from_bytes(&subset, true)
+                        .map_err(|e| tracing::warn!("subset font load failed: {e:?}"))
+                        .ok()
+                })
+                .unwrap_or_else(|| doc.fonts_mut().helvetica()),
+            _ => doc.fonts_mut().helvetica(),
+        };
         let mut page = doc.pages().get(page_index)?;
         let page_height = page.height().value;
         let annotations = page.annotations_mut();
@@ -312,19 +327,35 @@ pub fn create(
                     line_y += font_size * 1.3;
                 }
             }
+            NewAnnotation::Stamp { rect, stamp_id } => {
+                let img = stamp_image
+                    .ok_or_else(|| anyhow::anyhow!("stamp image {stamp_id} not resolved"))?;
+                let mut a = annotations.create_stamp_annotation()?;
+                a.set_bounds(to_pdf_rect(rect, page_height))?;
+                let mut obj = PdfPageImageObject::new(doc, &img)?;
+                // Image objects start out 1x1 pt; scale to the target rect,
+                // then move so the image's bottom-left sits at the rect's
+                // bottom-left in PDF coordinates.
+                obj.scale(rect.w, rect.h)?;
+                obj.translate(
+                    PdfPoints::new(rect.x),
+                    PdfPoints::new(page_height - (rect.y + rect.h)),
+                )?;
+                a.objects_mut().add_image_object(obj)?;
+            }
         }
         Ok(annotations.len() as usize)
     })
 }
 
-pub fn list(pdfium: &Pdfium, path: &Path, page_index: u16) -> anyhow::Result<Vec<AnnotationInfo>> {
-    let doc = pdfium.load_pdf_from_file(path, None)?;
+pub fn list(doc: &PdfDocument, page_index: u16) -> anyhow::Result<Vec<AnnotationInfo>> {
     let page = doc.pages().get(page_index)?;
     let page_height = page.height().value;
     let mut out = Vec::new();
     for (index, annot) in page.annotations().iter().enumerate() {
         out.push(AnnotationInfo {
             index,
+            nm: annot.name(),
             kind: format!("{:?}", annot.annotation_type()),
             rect: annot.bounds().ok().map(|b| from_pdf_rect(&b, page_height)),
             contents: annot.contents(),
@@ -333,14 +364,129 @@ pub fn list(pdfium: &Pdfium, path: &Path, page_index: u16) -> anyhow::Result<Vec
     Ok(out)
 }
 
-pub fn delete(pdfium: &Pdfium, path: &Path, page_index: u16, index: usize) -> anyhow::Result<()> {
+/// Delete by the annotation's stable /NM name. A purely numeric `annot_id`
+/// additionally falls back to positional index, but only when the annotation
+/// at that index has no /NM — a pre-/NM leftover the client could not address
+/// any other way. An indexed hit that *does* carry /NM is rejected instead:
+/// the client is holding a stale list and the index may now point at a
+/// different annotation (the original index-shift bug this replaces).
+pub fn delete(pdfium: &Pdfium, path: &Path, page_index: u16, annot_id: &str) -> anyhow::Result<()> {
     with_document(pdfium, path, |doc| {
         let mut page = doc.pages().get(page_index)?;
+        let target = {
+            let annots = page.annotations();
+            let by_name = annots
+                .iter()
+                .position(|a| a.name().as_deref() == Some(annot_id));
+            match (by_name, annot_id.parse::<usize>()) {
+                (Some(i), _) => i,
+                (None, Ok(index)) => {
+                    let annot = annots
+                        .get(index as _)
+                        .map_err(|_| anyhow::anyhow!("annotation index {index} out of range"))?;
+                    if annot.name().is_some() {
+                        anyhow::bail!(
+                            "annotation at index {index} has a stable id; refresh the list and delete by id"
+                        );
+                    }
+                    index
+                }
+                (None, Err(_)) => anyhow::bail!("annotation {annot_id} not found"),
+            }
+        };
         let annot = page
             .annotations()
-            .get(index as _)
-            .map_err(|_| anyhow::anyhow!("annotation index {index} out of range"))?;
+            .get(target as _)
+            .map_err(|_| anyhow::anyhow!("annotation index {target} out of range"))?;
         page.annotations_mut().delete_annotation(annot)?;
         Ok(())
     })
+}
+
+/// Stamp a stable /NM name (UUID) onto every user annotation that lacks one.
+///
+/// pdfium-render 0.8 can read /NM (`PdfPageAnnotationCommon::name`) but has
+/// no public writer (`set_string_value` is crate-private), so this runs as a
+/// lopdf pass after annotation writes — same dictionary-surgery approach as
+/// `formops::set_button_lopdf`. Sweeping the whole document also back-fills
+/// annotations created before /NM stamping existed.
+///
+/// Widget, Link, and Popup annotations are left untouched: widgets are form
+/// machinery addressed by index in `formops`, and links/popups are not
+/// user-managed annotations.
+pub fn ensure_annotation_names(path: &Path) -> anyhow::Result<()> {
+    use lopdf::{Dictionary, Document, Object, ObjectId};
+
+    fn needs_name(dict: &Dictionary) -> bool {
+        let subtype = dict
+            .get(b"Subtype")
+            .ok()
+            .and_then(|s| s.as_name().ok())
+            .unwrap_or_default();
+        !matches!(subtype, b"Widget" | b"Link" | b"Popup") && !dict.has(b"NM")
+    }
+
+    fn stamp(dict: &mut Dictionary) {
+        dict.set(
+            "NM",
+            Object::string_literal(uuid::Uuid::new_v4().to_string()),
+        );
+    }
+
+    /// PDFium's save writes annotations as inline dictionaries inside the
+    /// /Annots array; other producers use indirect references. Handle both:
+    /// stamp inline dicts in place, collect references for a later pass.
+    fn stamp_array(arr: &mut [Object], refs: &mut Vec<ObjectId>, dirty: &mut bool) {
+        for entry in arr.iter_mut() {
+            match entry {
+                Object::Dictionary(d) if needs_name(d) => {
+                    stamp(d);
+                    *dirty = true;
+                }
+                Object::Reference(r) => refs.push(*r),
+                _ => {}
+            }
+        }
+    }
+
+    let mut doc = Document::load(path)?;
+    let page_ids: Vec<ObjectId> = doc.get_pages().values().copied().collect();
+    let mut dirty = false;
+    let mut annot_refs: Vec<ObjectId> = Vec::new();
+
+    for page_id in page_ids {
+        // /Annots itself may also be direct or a reference to an array object.
+        let mut array_ref = None;
+        if let Ok(page) = doc.get_dictionary_mut(page_id) {
+            match page.get_mut(b"Annots") {
+                Ok(Object::Array(arr)) => stamp_array(arr, &mut annot_refs, &mut dirty),
+                Ok(Object::Reference(r)) => array_ref = Some(*r),
+                _ => {}
+            }
+        }
+        if let Some(rid) = array_ref {
+            if let Ok(Object::Array(arr)) = doc.get_object_mut(rid) {
+                stamp_array(arr, &mut annot_refs, &mut dirty);
+            }
+        }
+    }
+
+    for rid in annot_refs {
+        if let Ok(dict) = doc.get_dictionary_mut(rid) {
+            if needs_name(dict) {
+                stamp(dict);
+                dirty = true;
+            }
+        }
+    }
+
+    if !dirty {
+        return Ok(());
+    }
+    let mut bytes = Vec::new();
+    doc.save_to(&mut bytes)?;
+    let tmp = path.with_extension("pdf.tmp");
+    std::fs::write(&tmp, &bytes)?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
 }

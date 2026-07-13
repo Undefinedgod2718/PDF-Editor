@@ -1,5 +1,4 @@
 use std::io::Cursor;
-use std::path::Path;
 
 use image::ImageFormat;
 use pdfium_render::prelude::*;
@@ -12,6 +11,8 @@ pub struct PageInfo {
     pub width: f32,
     /// Page height in PDF points.
     pub height: f32,
+    /// Page rotation in degrees (0/90/180/270).
+    pub rotation: u16,
 }
 
 #[derive(Serialize)]
@@ -59,15 +60,21 @@ fn to_top_left(bounds: &PdfRect, page_height: f32) -> Rect {
     }
 }
 
-pub fn doc_info(pdfium: &Pdfium, path: &Path) -> anyhow::Result<DocInfo> {
-    let doc = pdfium.load_pdf_from_file(path, None)?;
+pub fn doc_info(doc: &PdfDocument) -> anyhow::Result<DocInfo> {
     let title = doc.metadata().get(PdfDocumentMetadataTagType::Title).map(|t| t.value().to_string());
     let mut pages = Vec::new();
     for (index, page) in doc.pages().iter().enumerate() {
+        let rotation = match page.rotation() {
+            Ok(PdfPageRenderRotation::Degrees90) => 90,
+            Ok(PdfPageRenderRotation::Degrees180) => 180,
+            Ok(PdfPageRenderRotation::Degrees270) => 270,
+            _ => 0,
+        };
         pages.push(PageInfo {
             index: index as u16,
             width: page.width().value,
             height: page.height().value,
+            rotation,
         });
     }
     Ok(DocInfo {
@@ -78,8 +85,7 @@ pub fn doc_info(pdfium: &Pdfium, path: &Path) -> anyhow::Result<DocInfo> {
 }
 
 /// Render one page to PNG. `scale` is pixels per PDF point (1.0 = 72 dpi).
-pub fn render_page(pdfium: &Pdfium, path: &Path, index: u16, scale: f32) -> anyhow::Result<Vec<u8>> {
-    let doc = pdfium.load_pdf_from_file(path, None)?;
+pub fn render_page(doc: &PdfDocument, index: u16, scale: f32) -> anyhow::Result<Vec<u8>> {
     let page = doc.pages().get(index)?;
     let width = (page.width().value * scale).round() as i32;
     let config = PdfRenderConfig::new()
@@ -93,8 +99,7 @@ pub fn render_page(pdfium: &Pdfium, path: &Path, index: u16, scale: f32) -> anyh
     Ok(buf.into_inner())
 }
 
-pub fn page_text(pdfium: &Pdfium, path: &Path, index: u16) -> anyhow::Result<PageText> {
-    let doc = pdfium.load_pdf_from_file(path, None)?;
+pub fn page_text(doc: &PdfDocument, index: u16) -> anyhow::Result<PageText> {
     let page = doc.pages().get(index)?;
     let page_height = page.height().value;
     let text = page.text()?;
@@ -114,12 +119,11 @@ pub fn page_text(pdfium: &Pdfium, path: &Path, index: u16) -> anyhow::Result<Pag
 
 /// Case-insensitive substring search across all pages, returning one hit
 /// with merged per-character rects per match.
-pub fn search(pdfium: &Pdfium, path: &Path, query: &str) -> anyhow::Result<Vec<SearchHit>> {
+pub fn search(doc: &PdfDocument, query: &str) -> anyhow::Result<Vec<SearchHit>> {
     let needle: Vec<char> = query.to_lowercase().chars().collect();
     if needle.is_empty() {
         return Ok(Vec::new());
     }
-    let doc = pdfium.load_pdf_from_file(path, None)?;
     let mut hits = Vec::new();
     for (page_index, page) in doc.pages().iter().enumerate() {
         let page_height = page.height().value;
