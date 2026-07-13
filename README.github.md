@@ -17,4 +17,4 @@ Requires `server/pdfium.dll` (Windows x64, included in this repo).
 
 ## Releases
 
-Tagged milestones: [GitHub Releases](https://github.com/Undefinedgod2718/PDF-Editor/releases). Current stable: **v0.1.0** (viewer + annotations).
+Tagged milestones: [GitHub Releases](https://github.com/Undefinedgod2718/PDF-Editor/releases). Current release candidate: **v0.2.0** (Phase 3+4: page ops, content edit, forms, signatures). Stable tag until release: **v0.1.0**.
