@@ -35,6 +35,12 @@ pub fn router() -> Router<SharedState> {
             axum::routing::delete(delete_page),
         )
         .route("/api/documents/{id}/pages", post(insert_page))
+        .route("/api/documents/{id}/pages/crop", post(crop_pages))
+        .route("/api/documents/{id}/pages/resize", post(resize_pages))
+        .route(
+            "/api/documents/{id}/pages/insert-from",
+            post(insert_pages_from),
+        )
         .route("/api/documents/{id}/pages/reorder", post(reorder_pages))
         .route("/api/documents/merge", post(merge_documents))
         .route("/api/documents/{id}/extract", post(extract_pages))
@@ -499,6 +505,63 @@ async fn insert_page(
 }
 
 #[derive(Deserialize)]
+struct CropBody {
+    /// 0-based page indices to crop.
+    pages: Vec<u16>,
+    /// View-space rect in points (origin top-left of the rendered page).
+    /// `null`/absent resets the crop to the full page.
+    rect: Option<pageops::CropRect>,
+}
+
+async fn crop_pages(
+    State(state): State<SharedState>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<CropBody>,
+) -> Result<impl IntoResponse, ApiError> {
+    state.storage.get(id).ok_or_else(not_found)?;
+    let path = state.storage.pdf_path(id);
+    state
+        .engine
+        .run(move |_pdfium, cache| {
+            pageops::crop(&path, &body.pages, body.rect)?;
+            cache.invalidate(&path);
+            Ok(())
+        })
+        .await?;
+    let revision = state.storage.bump_revision(id)?;
+    Ok(Json(serde_json::json!({ "ok": true, "revision": revision })))
+}
+
+#[derive(Deserialize)]
+struct ResizeBody {
+    /// 0-based page indices to resize.
+    pages: Vec<u16>,
+    /// Target size in points, in display orientation.
+    width: f32,
+    height: f32,
+    mode: pageops::ResizeMode,
+}
+
+async fn resize_pages(
+    State(state): State<SharedState>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<ResizeBody>,
+) -> Result<impl IntoResponse, ApiError> {
+    state.storage.get(id).ok_or_else(not_found)?;
+    let path = state.storage.pdf_path(id);
+    state
+        .engine
+        .run(move |_pdfium, cache| {
+            pageops::resize(&path, &body.pages, body.width, body.height, body.mode)?;
+            cache.invalidate(&path);
+            Ok(())
+        })
+        .await?;
+    let revision = state.storage.bump_revision(id)?;
+    Ok(Json(serde_json::json!({ "ok": true, "revision": revision })))
+}
+
+#[derive(Deserialize)]
 struct ReorderBody {
     order: Vec<u16>,
 }
@@ -514,6 +577,43 @@ async fn reorder_pages(
         .engine
         .run(move |pdfium, cache| {
             pageops::reorder(pdfium, &path, &body.order)?;
+            cache.invalidate(&path);
+            Ok(())
+        })
+        .await?;
+    let revision = state.storage.bump_revision(id)?;
+    Ok(Json(serde_json::json!({ "ok": true, "revision": revision })))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InsertFromBody {
+    /// Document to copy pages from (may equal the destination to duplicate).
+    source_id: Uuid,
+    /// 0-based page indices in the source, inserted in this order.
+    pages: Vec<u16>,
+    /// 0-based insert position in the destination; page count = append.
+    at: u16,
+}
+
+async fn insert_pages_from(
+    State(state): State<SharedState>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<InsertFromBody>,
+) -> Result<impl IntoResponse, ApiError> {
+    state.storage.get(id).ok_or_else(not_found)?;
+    state
+        .storage
+        .get(body.source_id)
+        .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "source document not found".into()))?;
+    let path = state.storage.pdf_path(id);
+    let src_path = state.storage.pdf_path(body.source_id);
+    state
+        .engine
+        .run(move |pdfium, cache| {
+            pageops::insert_from(pdfium, &path, &src_path, &body.pages, body.at)?;
+            // Copied pages may carry annotations without /NM; keep ids stable.
+            annots::ensure_annotation_names(&path)?;
             cache.invalidate(&path);
             Ok(())
         })
