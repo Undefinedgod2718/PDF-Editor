@@ -1,31 +1,11 @@
 import { useEffect, useState } from 'react'
 import { extractPages, listDocuments, mergeDocuments, type DocInfo, type DocMeta } from '../api'
+import { parsePageSpec } from '../lib/pageSpec'
 
 interface DialogProps {
   doc: DocInfo
   onClose: () => void
   onOpenDoc: (id: string) => void | Promise<void>
-}
-
-/** 解析「1,3-5」形式的頁碼字串為 0-based 索引陣列（去重、排序）。 */
-function parsePageSpec(spec: string, maxCount: number): number[] {
-  const out = new Set<number>()
-  const parts = spec
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-  if (parts.length === 0) throw new Error('請輸入頁碼')
-  for (const part of parts) {
-    const m = part.match(/^(\d+)(?:-(\d+))?$/)
-    if (!m) throw new Error(`無法解析：${part}`)
-    const a = Number(m[1])
-    const b = m[2] ? Number(m[2]) : a
-    if (a < 1 || b < 1 || a > maxCount || b > maxCount || a > b) {
-      throw new Error(`超出範圍（1-${maxCount}）：${part}`)
-    }
-    for (let p = a; p <= b; p++) out.add(p - 1)
-  }
-  return [...out].sort((x, y) => x - y)
 }
 
 function CreatedResult({

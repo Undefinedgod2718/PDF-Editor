@@ -352,9 +352,11 @@ fn inherited_rect(doc: &Document, page_id: ObjectId, key: &[u8]) -> Option<[f32;
 
 /// Inherited /Rotate, normalized to 0/90/180/270 (spec allows negatives
 /// and multiples of 360; non-multiples of 90 are treated as 0).
+/// Accepts Integer or Real — some writers emit `90.0`.
 fn inherited_rotation(doc: &Document, page_id: ObjectId) -> u16 {
     let raw = match inherited_attr(doc, page_id, b"Rotate") {
         Some(Object::Integer(n)) => n,
+        Some(Object::Real(n)) => n.round() as i64,
         _ => return 0,
     };
     let norm = raw.rem_euclid(360);
@@ -498,16 +500,11 @@ fn wrap_page_content(
         .get(b"Contents")
         .ok()
         .cloned();
-    let existing: Vec<Object> = match contents {
-        Some(Object::Reference(r)) => match doc.get_object(r) {
-            Ok(Object::Array(arr)) => arr.clone(),
-            Ok(Object::Stream(_)) => vec![Object::Reference(r)],
-            _ => return Ok(()),
-        },
-        Some(Object::Array(arr)) => arr,
-        // No content (e.g. a blank inserted page): box change is enough.
-        _ => return Ok(()),
+    // Blank page (no /Contents): box change alone is enough.
+    let Some(contents) = contents else {
+        return Ok(());
     };
+    let existing = contents_to_list(doc, contents)?;
     if existing.is_empty() {
         return Ok(());
     }
@@ -529,6 +526,35 @@ fn wrap_page_content(
     doc.get_dictionary_mut(page_id)?
         .set("Contents", Object::Array(new_list));
     Ok(())
+}
+
+/// Resolve page `/Contents` to a list of stream references (or keep an
+/// inline array). Broken / unexpected types error out so Scale resize
+/// cannot rewrite boxes while leaving content unscaled.
+fn contents_to_list(doc: &mut Document, obj: Object) -> anyhow::Result<Vec<Object>> {
+    match obj {
+        Object::Array(arr) => Ok(arr),
+        Object::Reference(r) => resolve_contents_ref(doc, r),
+        // Rare: inline stream on the page dict — promote so wrap can ref it.
+        Object::Stream(stream) => {
+            let id = doc.add_object(Object::Stream(stream));
+            Ok(vec![Object::Reference(id)])
+        }
+        _ => anyhow::bail!("page /Contents is not a stream or array"),
+    }
+}
+
+fn resolve_contents_ref(doc: &Document, mut id: ObjectId) -> anyhow::Result<Vec<Object>> {
+    for _ in 0..8 {
+        match doc.get_object(id) {
+            Ok(Object::Stream(_)) => return Ok(vec![Object::Reference(id)]),
+            Ok(Object::Array(arr)) => return Ok(arr.clone()),
+            Ok(Object::Reference(next)) => id = *next,
+            Ok(_) => anyhow::bail!("page /Contents does not resolve to a stream or array"),
+            Err(_) => anyhow::bail!("broken page /Contents reference"),
+        }
+    }
+    anyhow::bail!("page /Contents indirection too deep")
 }
 
 /// Apply `p' = s*p + (e, f)` to the coordinate entries of every annotation
@@ -654,4 +680,49 @@ pub fn extract(pdfium: &Pdfium, path: &Path, pages: &[u16]) -> anyhow::Result<Ve
             .copy_page_from_document(&src, src_index, dest_index as u16)?;
     }
     Ok(dest.save_to_bytes()?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lopdf::Dictionary;
+
+    #[test]
+    fn rotation_accepts_real() {
+        let mut doc = Document::with_version("1.5");
+        let mut page = Dictionary::new();
+        page.set("Type", "Page");
+        page.set("Rotate", Object::Real(90.0));
+        let id = doc.add_object(Object::Dictionary(page));
+        assert_eq!(inherited_rotation(&doc, id), 90);
+    }
+
+    #[test]
+    fn wrap_fails_on_broken_contents_ref() {
+        let mut doc = Document::with_version("1.5");
+        let mut page = Dictionary::new();
+        page.set("Type", "Page");
+        page.set("Contents", Object::Reference((999, 0)));
+        let id = doc.add_object(Object::Dictionary(page));
+        let err = wrap_page_content(&mut doc, id, 0.5, 0.0, 0.0).unwrap_err();
+        assert!(
+            err.to_string().contains("Contents"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn wrap_fails_on_wrong_contents_type() {
+        let mut doc = Document::with_version("1.5");
+        let bad = doc.add_object(Object::Integer(1));
+        let mut page = Dictionary::new();
+        page.set("Type", "Page");
+        page.set("Contents", Object::Reference(bad));
+        let id = doc.add_object(Object::Dictionary(page));
+        let err = wrap_page_content(&mut doc, id, 0.5, 0.0, 0.0).unwrap_err();
+        assert!(
+            err.to_string().contains("Contents"),
+            "unexpected error: {err}"
+        );
+    }
 }

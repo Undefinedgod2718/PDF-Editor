@@ -11,6 +11,8 @@ interface Props {
   showSearch: boolean
   toggleSearch: () => void
   openFile: (f: File) => void
+  cropMode: boolean
+  toggleCrop: () => void
 }
 
 const ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]
@@ -26,6 +28,8 @@ export default function Toolbar({
   showSearch,
   toggleSearch,
   openFile,
+  cropMode,
+  toggleCrop,
 }: Props) {
   const zoomIn = () => {
     const next = ZOOM_STEPS.find((z) => z > scale + 0.001)
@@ -116,6 +120,9 @@ export default function Toolbar({
           onClick={toggleSearch}
         >
           🔍
+        </button>
+        <button className={`tb-btn ${cropMode ? 'active' : ''}`} title="裁切" onClick={toggleCrop}>
+          裁切
         </button>
       </div>
     </div>
