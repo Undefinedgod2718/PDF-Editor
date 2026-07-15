@@ -5,10 +5,11 @@ import {
   useImperativeHandle,
   useRef,
 } from 'react'
-import { fetchPageText, renderUrl, type CharBox, type Color, type DocInfo, type FormField, type Rect, type SearchHit, type StampMeta } from '../api'
+import { fetchPageText, renderUrl, type CharBox, type Color, type DocInfo, type FormField, type ImageInfo, type Rect, type SearchHit, type StampMeta } from '../api'
 import AnnotLayer from './AnnotLayer'
 import FormLayer from './FormLayer'
 import CropLayer from './CropLayer'
+import ImageLayer from './ImageLayer'
 import type { AnnotTool } from './AnnotToolbar'
 
 interface FlashTarget {
@@ -38,6 +39,17 @@ interface Props {
   cropMode: boolean
   /** 裁切選取範圍變動（拖曳完成）回呼，帶出 view-space points 矩形。 */
   onCropRectChange: (rectPt: Rect) => void
+  /** 影像模式是否啟用（Toolbar「影像」按鈕）。 */
+  imageMode: boolean
+  /** 目前選取的既有影像 index（取代影像用），未選取時為 null。 */
+  selectedImageIndex: number | null
+  onSelectImage: (img: ImageInfo) => void
+  /** 是否已選好要插入的檔案，等待在頁面上拖曳/點擊放置。 */
+  insertArmed: boolean
+  /** 插入檔案的原始尺寸換算成 points（96dpi）。 */
+  insertNaturalPt: { w: number; h: number } | null
+  /** 插入影像拖曳／點擊放置完成後回呼，帶出 view-space points 矩形。 */
+  onInsertRectChange: (rectPt: Rect) => void
 }
 
 export interface ViewerHandle {
@@ -64,6 +76,12 @@ const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(
     currentPage,
     cropMode,
     onCropRectChange,
+    imageMode,
+    selectedImageIndex,
+    onSelectImage,
+    insertArmed,
+    insertNaturalPt,
+    onInsertRectChange,
   },
   ref,
 ) {
@@ -186,6 +204,21 @@ const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(
             )}
             {cropMode && page.index === currentPage && (
               <CropLayer scale={scale} onRectChange={onCropRectChange} />
+            )}
+            {imageMode && page.index === currentPage && (
+              <ImageLayer
+                docId={doc.id}
+                page={page.index}
+                scale={scale}
+                version={pageVersions[page.index] ?? 0}
+                pageWidth={page.width}
+                pageHeight={page.height}
+                selectedIndex={selectedImageIndex}
+                onSelectImage={onSelectImage}
+                insertArmed={insertArmed}
+                insertNaturalPt={insertNaturalPt}
+                onInsertRectChange={onInsertRectChange}
+              />
             )}
           </div>
         )

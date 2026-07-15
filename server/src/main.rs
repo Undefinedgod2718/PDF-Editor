@@ -1,5 +1,6 @@
 mod api;
 mod pdf;
+mod sidecar;
 mod storage;
 
 use std::net::SocketAddr;

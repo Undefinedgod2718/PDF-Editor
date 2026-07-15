@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   fetchDocForm,
   fetchDocInfo,
+  getProtectionStatus,
   uploadPdf,
   type Color,
   type DocInfo,
   type FormField,
+  type ImageInfo,
   type Rect,
   type SearchHit,
   type StampMeta,
@@ -20,6 +22,12 @@ import StampDrawer from './components/StampDrawer'
 import DrawingModal from './components/DrawingModal'
 import SignaturePad from './components/SignaturePad'
 import CropBar from './components/CropBar'
+import ImageBar from './components/ImageBar'
+import ExportDialog from './components/ExportDialog'
+import CompressDialog from './components/CompressDialog'
+import ProtectDialog from './components/ProtectDialog'
+import EncryptDialog from './components/EncryptDialog'
+import DecryptPrompt from './components/DecryptPrompt'
 
 interface FlashTarget {
   page: number
@@ -57,10 +65,40 @@ export default function App() {
   const [cropMode, setCropMode] = useState(false)
   const [cropRect, setCropRect] = useState<Rect | null>(null)
 
-  // 換頁時丟掉上一頁的選取，避免把 A 頁 view-space rect 套到 B 頁。
+  // ---- 影像插入／取代相關狀態（Phase 7）----
+  const [imageMode, setImageMode] = useState(false)
+  const [selectedImage, setSelectedImage] = useState<ImageInfo | null>(null)
+  const [insertArmed, setInsertArmed] = useState(false)
+  const [insertNaturalPt, setInsertNaturalPt] = useState<{ w: number; h: number } | null>(null)
+  const [insertRect, setInsertRect] = useState<Rect | null>(null)
+
+  // ---- 匯出對話框相關狀態（Phase 8）----
+  const [showExport, setShowExport] = useState(false)
+
+  // ---- 壓縮對話框相關狀態（Phase 9）----
+  const [showCompress, setShowCompress] = useState(false)
+
+  // ---- 保護對話框相關狀態（Phase 11）----
+  const [showProtect, setShowProtect] = useState(false)
+
+  // ---- 密文對話框相關狀態（Phase 12）----
+  const [showEncrypt, setShowEncrypt] = useState(false)
+  // 上傳／開啟文件時 GET /info 失敗，且偵測到是開檔密碼加密的文件：記錄 id／檔名，
+  // 顯示「輸入密碼解密下載」提示，取代原本的死錯誤訊息。
+  const [lockedDoc, setLockedDoc] = useState<{ id: string; filename?: string } | null>(null)
+
+  const resetImageInteraction = useCallback(() => {
+    setSelectedImage(null)
+    setInsertArmed(false)
+    setInsertNaturalPt(null)
+    setInsertRect(null)
+  }, [])
+
+  // 換頁時丟掉上一頁的選取，避免把 A 頁 view-space rect／影像選取套到 B 頁。
   useEffect(() => {
     setCropRect(null)
-  }, [currentPage])
+    resetImageInteraction()
+  }, [currentPage, resetImageInteraction])
 
   // 載入文件（開啟本地檔案／合併或擷取後切換開啟）共用的重置邏輯。
   const loadDoc = useCallback(async (id: string) => {
@@ -77,37 +115,68 @@ export default function App() {
     setFormFieldsLoaded(false)
     setCropMode(false)
     setCropRect(null)
+    setImageMode(false)
+    setSelectedImage(null)
+    setInsertArmed(false)
+    setInsertNaturalPt(null)
+    setInsertRect(null)
+    setShowExport(false)
+    setShowCompress(false)
+    setShowProtect(false)
+    setShowEncrypt(false)
+  }, [])
+
+  // fetchDocInfo／render 對開檔密碼加密的 PDF 一律 500（PDFium 打不開）。GET /protection
+  // 則讀得到（權限位元不受加密影響），protected=true 是「這份文件需要解密」的訊號。
+  // 偵測到就顯示解密提示，取代原本的死錯誤訊息；回傳 true 代表已處理（呼叫端不必再 setError）。
+  const tryHandleEncrypted = useCallback(async (id: string, filename?: string): Promise<boolean> => {
+    try {
+      const status = await getProtectionStatus(id)
+      if (status.protected) {
+        setLockedDoc({ id, filename })
+        return true
+      }
+    } catch {
+      // 連 /protection 都失敗：不是加密造成的已知情境，交給原本的錯誤訊息處理。
+    }
+    return false
   }, [])
 
   const openFile = useCallback(
     async (file: File) => {
       setBusy(true)
       setError(null)
+      setLockedDoc(null)
+      let uploadedId: string | undefined
       try {
         const { id } = await uploadPdf(file)
+        uploadedId = id
         await loadDoc(id)
       } catch (e) {
+        if (uploadedId && (await tryHandleEncrypted(uploadedId, file.name))) return
         setError(e instanceof Error ? e.message : String(e))
       } finally {
         setBusy(false)
       }
     },
-    [loadDoc],
+    [loadDoc, tryHandleEncrypted],
   )
 
   const openDocById = useCallback(
     async (id: string) => {
       setBusy(true)
       setError(null)
+      setLockedDoc(null)
       try {
         await loadDoc(id)
       } catch (e) {
+        if (await tryHandleEncrypted(id)) return
         setError(e instanceof Error ? e.message : String(e))
       } finally {
         setBusy(false)
       }
     },
-    [loadDoc],
+    [loadDoc, tryHandleEncrypted],
   )
 
   const gotoPage = useCallback((p: number) => {
@@ -138,6 +207,13 @@ export default function App() {
     for (let i = 0; i < doc.pageCount; i++) out[i] = doc.revision + (pageVersions[i] ?? 0)
     return out
   }, [doc, pageVersions])
+
+  // 該頁內容版本變了（刪物件／寫入／revision bump）→ 全物件集合可能重編 index。
+  // 沒有穩定影像 ID，只能清選取，逼使用者重點；否則 replace 會打到錯物件。
+  const currentImageListVersion = renderVersions[currentPage] ?? 0
+  useEffect(() => {
+    setSelectedImage(null)
+  }, [currentImageListVersion])
 
   // 頁面結構操作（旋轉/刪除/插入/重排）成功後：重新抓 doc info，並清空全部頁面的
   // pageVersions 快取（全部 +1），確保縮圖與內文渲染都重新抓取最新內容。
@@ -192,11 +268,29 @@ export default function App() {
   const toggleCrop = useCallback(() => {
     setCropMode((v) => {
       const next = !v
-      if (next) setTool('select') // 裁切時停用其他註解工具，避免 AnnotLayer 搶走指標事件
-      else setCropRect(null)
+      if (next) {
+        setTool('select') // 裁切時停用其他註解工具，避免 AnnotLayer 搶走指標事件
+        setImageMode(false)
+        resetImageInteraction()
+      } else {
+        setCropRect(null)
+      }
       return next
     })
-  }, [])
+  }, [resetImageInteraction])
+
+  const toggleImageMode = useCallback(() => {
+    setImageMode((v) => {
+      const next = !v
+      if (next) {
+        setTool('select') // 影像模式時停用其他註解工具，避免 AnnotLayer 搶走指標事件
+        setCropMode(false)
+        setCropRect(null)
+      }
+      resetImageInteraction()
+      return next
+    })
+  }, [resetImageInteraction])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -212,12 +306,17 @@ export default function App() {
           setCropRect(null)
           return
         }
+        if (imageMode) {
+          setImageMode(false)
+          resetImageInteraction()
+          return
+        }
         setTool('select')
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [doc, tool, cropMode])
+  }, [doc, tool, cropMode, imageMode, resetImageInteraction])
 
   if (!doc) {
     return (
@@ -240,6 +339,13 @@ export default function App() {
           </label>
           {error && <p className="error">{error}</p>}
         </div>
+        {lockedDoc && (
+          <DecryptPrompt
+            id={lockedDoc.id}
+            filename={lockedDoc.filename}
+            onClose={() => setLockedDoc(null)}
+          />
+        )}
       </div>
     )
   }
@@ -259,6 +365,16 @@ export default function App() {
         openFile={openFile}
         cropMode={cropMode}
         toggleCrop={toggleCrop}
+        imageMode={imageMode}
+        toggleImageMode={toggleImageMode}
+        showExport={showExport}
+        toggleExport={() => setShowExport((v) => !v)}
+        showCompress={showCompress}
+        toggleCompress={() => setShowCompress((v) => !v)}
+        showProtect={showProtect}
+        toggleProtect={() => setShowProtect((v) => !v)}
+        showEncrypt={showEncrypt}
+        toggleEncrypt={() => setShowEncrypt((v) => !v)}
       />
       <AnnotToolbar
         tool={tool}
@@ -301,6 +417,12 @@ export default function App() {
           currentPage={currentPage}
           cropMode={cropMode}
           onCropRectChange={setCropRect}
+          imageMode={imageMode}
+          selectedImageIndex={selectedImage?.index ?? null}
+          onSelectImage={setSelectedImage}
+          insertArmed={insertArmed}
+          insertNaturalPt={insertNaturalPt}
+          onInsertRectChange={setInsertRect}
         />
         {cropMode && (
           <CropBar
@@ -311,6 +433,27 @@ export default function App() {
             onClose={() => {
               setCropMode(false)
               setCropRect(null)
+            }}
+          />
+        )}
+        {imageMode && (
+          <ImageBar
+            doc={doc}
+            currentPage={currentPage}
+            selectedImage={selectedImage}
+            insertArmed={insertArmed}
+            insertRect={insertRect}
+            onArmInsert={(naturalPt) => {
+              setInsertArmed(true)
+              setInsertNaturalPt(naturalPt)
+              setInsertRect(null)
+              setSelectedImage(null)
+            }}
+            onApplied={() => bumpPageVersion(currentPage)}
+            onReset={resetImageInteraction}
+            onClose={() => {
+              setImageMode(false)
+              resetImageInteraction()
             }}
           />
         )}
@@ -363,6 +506,35 @@ export default function App() {
               setTool('stamp')
             }}
             onCancel={() => setTool('select')}
+          />
+        )}
+        {showExport && <ExportDialog doc={doc} onClose={() => setShowExport(false)} />}
+        {showCompress && (
+          <CompressDialog
+            doc={doc}
+            onClose={() => setShowCompress(false)}
+            onOpenDoc={async (id) => {
+              setShowCompress(false)
+              await openDocById(id)
+            }}
+          />
+        )}
+        {showProtect && (
+          <ProtectDialog
+            doc={doc}
+            onClose={() => setShowProtect(false)}
+            onOpenDoc={async (id) => {
+              setShowProtect(false)
+              await openDocById(id)
+            }}
+          />
+        )}
+        {showEncrypt && <EncryptDialog doc={doc} onClose={() => setShowEncrypt(false)} />}
+        {lockedDoc && (
+          <DecryptPrompt
+            id={lockedDoc.id}
+            filename={lockedDoc.filename}
+            onClose={() => setLockedDoc(null)}
           />
         )}
       </div>

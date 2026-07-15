@@ -7,6 +7,7 @@ use std::path::Path;
 use pdfium_render::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use super::protect;
 use super::with_document;
 
 #[derive(Serialize)]
@@ -225,6 +226,7 @@ fn set_button_lopdf(
     annot_index: usize,
     checked: bool,
 ) -> anyhow::Result<()> {
+    protect::assert_editable(path)?;
     use lopdf::{Dictionary, Document, Object, ObjectId};
 
     let mut doc = Document::load(path)?;

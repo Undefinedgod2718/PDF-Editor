@@ -22,6 +22,10 @@ ttf-parser = "0.25.1"
 subsetter = "0.2.6"
 lopdf = "0.44.0"
 lru = "0.12"
+flate2 = "1"
+zip = "2"
+tiff = "0.9"
+argon2 = { version = "0.5", features = ["std"] }
 
 [profile.release]
 lto = true
