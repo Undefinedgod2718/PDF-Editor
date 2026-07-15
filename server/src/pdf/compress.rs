@@ -22,6 +22,8 @@ use image::imageops::FilterType;
 use lopdf::content::Content;
 use lopdf::{Dictionary, Document, Object, ObjectId};
 
+use super::protect;
+
 #[derive(Debug, Clone, Copy)]
 pub struct CompressOptions {
     /// Images drawn at more than ~1.25x this DPI are downsampled to it.
@@ -46,6 +48,9 @@ const MAX_FORM_DEPTH: u8 = 8;
 const DPI_SLACK: f32 = 1.25;
 
 pub fn compress(path: &Path, opts: &CompressOptions) -> anyhow::Result<(Vec<u8>, CompressStats)> {
+    // Empty-user-password (P11) PDFs auto-decrypt on `Document::load` and the
+    // trailer `/Encrypt` check below would miss them — refuse first.
+    protect::assert_editable(path)?;
     let mut doc = Document::load(path)?;
     if doc.trailer.get(b"Encrypt").is_ok() {
         anyhow::bail!("encrypted documents are not supported");

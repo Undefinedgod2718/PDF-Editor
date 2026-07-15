@@ -205,11 +205,26 @@ fn encrypt_v4(
 }
 
 /// Decrypt an open-password PDF (P12) given its password, returning a plain,
-/// viewable PDF. Wrong password → `User("incorrect password")`. A document
-/// with no open password (empty user password, or unencrypted) is rejected
-/// as `User` rather than silently returning it, so the endpoint's contract
-/// stays "this removes an open password".
+/// viewable PDF. Wrong password → `User("incorrect password")`.
+///
+/// Empty-user-password documents (P11 permission protection) authenticate
+/// with `""` under `load_with_password` — they must go through [`unprotect`]
+/// (owner password + `protection_hash`), not this endpoint.
 pub fn decrypt(path: &Path, password: &str) -> Result<Vec<u8>, ProtectError> {
+    // Preflight with a plain load: P11 / empty-user-password auto-authenticates
+    // and clears `is_encrypted()` while setting `was_encrypted()`.
+    {
+        let probe = Document::load(path)?;
+        if probe.was_encrypted() && !probe.is_encrypted() {
+            return Err(ProtectError::User(
+                "document has no open password; use unprotect instead".into(),
+            ));
+        }
+        if !probe.is_encrypted() {
+            return Err(ProtectError::User("document is not encrypted".into()));
+        }
+    }
+
     // Must load *with* the password: a plain `Document::load` on an
     // open-password PDF cannot authenticate (the empty password fails), so it
     // returns a document with an empty object set — saving that yields a
@@ -222,9 +237,8 @@ pub fn decrypt(path: &Path, password: &str) -> Result<Vec<u8>, ProtectError> {
         }
         Err(e) => return Err(e.into()),
     };
-    // `was_encrypted()` is set once an /Encrypt handler has been authenticated
-    // and stripped in memory. If it's clear, the input had no encryption at
-    // all — nothing to remove.
+    // Defensive: authenticated load should have cleared /Encrypt into
+    // `was_encrypted`. If not, refuse rather than ship a half-decoded file.
     if !doc.was_encrypted() {
         return Err(ProtectError::User("document is not encrypted".into()));
     }
