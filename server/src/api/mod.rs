@@ -1225,6 +1225,14 @@ async fn decrypt_document(
     Json(body): Json<DecryptBody>,
 ) -> Result<impl IntoResponse, ApiError> {
     let meta = state.storage.get(id).ok_or_else(not_found)?;
+    // Library-side P11 protection is tracked by this hash; those files have an
+    // empty user password and must use `/unprotect`, never `/decrypt`.
+    if meta.protection_hash.is_some() {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "document has no open password; use unprotect instead".into(),
+        ));
+    }
     let path = state.storage.pdf_path(id);
 
     let password = body.password;
