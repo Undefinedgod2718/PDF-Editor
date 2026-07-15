@@ -8,6 +8,7 @@ import {
 import { fetchPageText, renderUrl, type CharBox, type Color, type DocInfo, type FormField, type Rect, type SearchHit, type StampMeta } from '../api'
 import AnnotLayer from './AnnotLayer'
 import FormLayer from './FormLayer'
+import CropLayer from './CropLayer'
 import type { AnnotTool } from './AnnotToolbar'
 
 interface FlashTarget {
@@ -31,6 +32,12 @@ interface Props {
   flash: FlashTarget | null
   formFields: FormField[]
   onFormFieldChanged: (page: number) => void
+  /** 目前中心頁（App.tsx 的 currentPage），裁切模式僅在此頁面顯示互動層。 */
+  currentPage: number
+  /** 裁切模式是否啟用（Toolbar「裁切」按鈕）。 */
+  cropMode: boolean
+  /** 裁切選取範圍變動（拖曳完成）回呼，帶出 view-space points 矩形。 */
+  onCropRectChange: (rectPt: Rect) => void
 }
 
 export interface ViewerHandle {
@@ -54,6 +61,9 @@ const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(
     flash,
     formFields,
     onFormFieldChanged,
+    currentPage,
+    cropMode,
+    onCropRectChange,
   },
   ref,
 ) {
@@ -173,6 +183,9 @@ const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(
                 fields={formFields.filter((f) => f.page === page.index)}
                 onFieldChanged={onFormFieldChanged}
               />
+            )}
+            {cropMode && page.index === currentPage && (
+              <CropLayer scale={scale} onRectChange={onCropRectChange} />
             )}
           </div>
         )

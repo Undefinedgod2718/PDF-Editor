@@ -902,3 +902,89 @@ body,
 .text-obj-box:hover {
   background: rgba(76, 141, 255, 0.2);
 }
+
+/* ---------- 頁面裁切（Phase 6）---------- */
+.crop-layer {
+  position: absolute;
+  inset: 0;
+  cursor: crosshair;
+  pointer-events: auto;
+}
+
+.crop-select-rect {
+  position: absolute;
+  border: 2px dashed #ff8c00;
+  background: rgba(255, 140, 0, 0.15);
+  pointer-events: none;
+}
+
+.crop-bar {
+  position: fixed;
+  top: 90px;
+  right: 24px;
+  z-index: 60;
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+}
+
+.crop-bar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 14px;
+}
+
+.crop-bar-status {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.crop-bar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* ---------- 通用 radio 群組（裁切／調整大小對話框共用）---------- */
+.radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.radio-group label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ---------- 調整頁面大小對話框（Phase 6）---------- */
+.resize-dim-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.resize-dim-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--text-dim);
+  flex: 1;
+}
+
+.inline-num {
+  width: 56px;
+  display: inline-block;
+}

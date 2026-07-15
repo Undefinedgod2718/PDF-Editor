@@ -330,3 +330,48 @@ export async function setFormFieldValue(
   })
   return jsonOrThrow(res)
 }
+
+// ---------- 頁面幾何（Phase 6）----------
+
+export type ResizeMode = 'scale' | 'canvas'
+
+/** 裁切頁面。rect 為 view-space points（已套用旋轉、與渲染畫面一致），null 表示重設為整頁。 */
+export async function cropPages(id: string, pages: number[], rect: Rect | null): Promise<Mutated> {
+  const res = await fetch(`/api/documents/${id}/pages/crop`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pages, rect }),
+  })
+  return jsonOrThrow(res)
+}
+
+/** 調整頁面大小。width/height 為顯示方向下的 points（36–14400）。 */
+export async function resizePages(
+  id: string,
+  pages: number[],
+  width: number,
+  height: number,
+  mode: ResizeMode,
+): Promise<Mutated> {
+  const res = await fetch(`/api/documents/${id}/pages/resize`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pages, width, height, mode }),
+  })
+  return jsonOrThrow(res)
+}
+
+/** 從另一份文件（可為同一份）插入頁面。pages 為來源 0-based 索引，at 為目的地 0-based 插入位置。 */
+export async function insertPagesFrom(
+  id: string,
+  sourceId: string,
+  pages: number[],
+  at: number,
+): Promise<Mutated> {
+  const res = await fetch(`/api/documents/${id}/pages/insert-from`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sourceId, pages, at }),
+  })
+  return jsonOrThrow(res)
+}

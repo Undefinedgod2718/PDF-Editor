@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { deletePage, insertPage, reorderPages, rotatePage, renderUrl, type DocInfo } from '../api'
 import { MergeDialog, ExtractDialog } from './PageDialogs'
+import ResizeDialog from './ResizeDialog'
+import InsertFromDialog from './InsertFromDialog'
 
 interface Props {
   doc: DocInfo
@@ -26,6 +28,8 @@ export default function ThumbnailPanel({
   const [busy, setBusy] = useState(false)
   const [showMerge, setShowMerge] = useState(false)
   const [showExtract, setShowExtract] = useState(false)
+  const [showResize, setShowResize] = useState(false)
+  const [showInsertFrom, setShowInsertFrom] = useState(false)
 
   const runOp = async (fn: () => Promise<unknown>) => {
     setBusy(true)
@@ -143,7 +147,29 @@ export default function ThumbnailPanel({
         <button className="tb-btn" onClick={() => setShowExtract(true)}>
           擷取頁面
         </button>
+        <button className="tb-btn" onClick={() => setShowResize(true)}>
+          調整頁面大小
+        </button>
+        <button className="tb-btn" onClick={() => setShowInsertFrom(true)}>
+          從其他文件插入頁面
+        </button>
       </div>
+
+      {showResize && (
+        <ResizeDialog
+          doc={doc}
+          currentPage={currentPage}
+          onClose={() => setShowResize(false)}
+          onApplied={onStructureChanged}
+        />
+      )}
+      {showInsertFrom && (
+        <InsertFromDialog
+          doc={doc}
+          onClose={() => setShowInsertFrom(false)}
+          onApplied={onStructureChanged}
+        />
+      )}
 
       {showMerge && (
         <MergeDialog

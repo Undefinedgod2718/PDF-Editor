@@ -19,6 +19,7 @@ import AnnotPanel from './components/AnnotPanel'
 import StampDrawer from './components/StampDrawer'
 import DrawingModal from './components/DrawingModal'
 import SignaturePad from './components/SignaturePad'
+import CropBar from './components/CropBar'
 
 interface FlashTarget {
   page: number
@@ -52,6 +53,15 @@ export default function App() {
   const [formFields, setFormFields] = useState<FormField[]>([])
   const [formFieldsLoaded, setFormFieldsLoaded] = useState(false)
 
+  // ---- 頁面裁切相關狀態（Phase 6）----
+  const [cropMode, setCropMode] = useState(false)
+  const [cropRect, setCropRect] = useState<Rect | null>(null)
+
+  // 換頁時丟掉上一頁的選取，避免把 A 頁 view-space rect 套到 B 頁。
+  useEffect(() => {
+    setCropRect(null)
+  }, [currentPage])
+
   // 載入文件（開啟本地檔案／合併或擷取後切換開啟）共用的重置邏輯。
   const loadDoc = useCallback(async (id: string) => {
     const info = await fetchDocInfo(id)
@@ -65,6 +75,8 @@ export default function App() {
     setSelectedStamp(null)
     setFormFields([])
     setFormFieldsLoaded(false)
+    setCropMode(false)
+    setCropRect(null)
   }, [])
 
   const openFile = useCallback(
@@ -177,6 +189,15 @@ export default function App() {
     [doc, bumpPageVersion],
   )
 
+  const toggleCrop = useCallback(() => {
+    setCropMode((v) => {
+      const next = !v
+      if (next) setTool('select') // 裁切時停用其他註解工具，避免 AnnotLayer 搶走指標事件
+      else setCropRect(null)
+      return next
+    })
+  }, [])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'f' && doc) {
@@ -186,12 +207,17 @@ export default function App() {
       if (e.key === 'Escape') {
         // 繪圖模式／簽名板開啟時由各自的 modal 處理 Escape（stopPropagation 後關閉），避免搶先把 tool 切走。
         if (tool === 'draw' || tool === 'sign') return
+        if (cropMode) {
+          setCropMode(false)
+          setCropRect(null)
+          return
+        }
         setTool('select')
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [doc, tool])
+  }, [doc, tool, cropMode])
 
   if (!doc) {
     return (
@@ -231,6 +257,8 @@ export default function App() {
         showSearch={showSearch}
         toggleSearch={() => setShowSearch((v) => !v)}
         openFile={openFile}
+        cropMode={cropMode}
+        toggleCrop={toggleCrop}
       />
       <AnnotToolbar
         tool={tool}
@@ -270,7 +298,22 @@ export default function App() {
           flash={flash}
           formFields={formFields}
           onFormFieldChanged={onFormFieldChanged}
+          currentPage={currentPage}
+          cropMode={cropMode}
+          onCropRectChange={setCropRect}
         />
+        {cropMode && (
+          <CropBar
+            doc={doc}
+            currentPage={currentPage}
+            rect={cropRect}
+            onApplied={refreshDocStructure}
+            onClose={() => {
+              setCropMode(false)
+              setCropRect(null)
+            }}
+          />
+        )}
         {showSearch && (
           <SearchPanel
             doc={doc}
