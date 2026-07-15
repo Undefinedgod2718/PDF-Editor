@@ -8,6 +8,11 @@ target/
 # Runtime uploads
 server/data/
 
+# Python sidecar venv / test artifacts
+python/.venv/
+python/.testout/
+**/.venv/
+
 # Deploy staging / Windows service helper (binaries, built dist)
 deploy/stage/
 deploy/*.exe
@@ -18,6 +23,7 @@ wiki/
 
 # Agent tooling (not part of the product)
 .claude/
+.cursor/
 
 # Logs / OS / editors
 *.log

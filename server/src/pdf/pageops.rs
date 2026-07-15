@@ -8,6 +8,7 @@ use std::path::Path;
 use lopdf::{Document, Object, ObjectId};
 use pdfium_render::prelude::*;
 
+use super::protect;
 use super::with_document;
 
 const DEFAULT_PAGE_W: f32 = 612.0; // US Letter, points
@@ -77,6 +78,7 @@ pub fn insert_blank(
 
 /// Reorder pages. `order` must be a permutation of 0..page_count.
 pub fn reorder(pdfium: &Pdfium, path: &Path, order: &[u16]) -> anyhow::Result<()> {
+    protect::assert_editable(path)?;
     let bytes = std::fs::read(path)?;
     let src = pdfium.load_pdf_from_byte_vec(bytes, None)?;
     let count = src.pages().len();
@@ -120,6 +122,7 @@ pub fn insert_from(
     if src_pages.is_empty() {
         anyhow::bail!("insert needs at least one source page");
     }
+    protect::assert_editable(dst_path)?;
     let dst_bytes = std::fs::read(dst_path)?;
     let src_bytes = std::fs::read(src_path)?;
     let mut dst = pdfium.load_pdf_from_byte_vec(dst_bytes, None)?;
@@ -190,6 +193,7 @@ pub fn crop(path: &Path, pages: &[u16], rect: Option<CropRect>) -> anyhow::Resul
     if pages.is_empty() {
         anyhow::bail!("crop needs at least one page");
     }
+    protect::assert_editable(path)?;
     let mut doc = Document::load(path)?;
     // get_pages(): 1-based page number -> object id.
     let page_map = doc.get_pages();
@@ -405,6 +409,7 @@ pub fn resize(
             anyhow::bail!("page size {v} pt out of range ({MIN_PAGE_PTS}..={MAX_PAGE_PTS})");
         }
     }
+    protect::assert_editable(path)?;
     let mut doc = Document::load(path)?;
     let page_map = doc.get_pages();
     let count = page_map.len() as u16;

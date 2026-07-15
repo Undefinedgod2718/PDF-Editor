@@ -417,6 +417,10 @@ pub fn delete(pdfium: &Pdfium, path: &Path, page_index: u16, annot_id: &str) -> 
 pub fn ensure_annotation_names(path: &Path) -> anyhow::Result<()> {
     use lopdf::{Dictionary, Document, Object, ObjectId};
 
+    // Caller normally ran `with_document` first; keep the guard for any
+    // future direct call — a lopdf load+save also strips /Encrypt.
+    super::protect::assert_editable(path)?;
+
     fn needs_name(dict: &Dictionary) -> bool {
         let subtype = dict
             .get(b"Subtype")

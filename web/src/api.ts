@@ -375,3 +375,276 @@ export async function insertPagesFrom(
   })
   return jsonOrThrow(res)
 }
+
+// ---------- 影像插入／取代（Phase 7）----------
+
+/** 頁面影像物件（可插入/取代），index 為該頁全物件集合中的位置，增刪後需重新 GET。 */
+export interface ImageInfo {
+  index: number
+  x: number
+  y: number
+  w: number
+  h: number
+  pxWidth: number
+  pxHeight: number
+  filters: string[]
+  bitsPerPixel: number | null
+}
+
+export async function listPageImages(id: string, page: number): Promise<ImageInfo[]> {
+  const res = await fetch(`/api/documents/${id}/pages/${page}/images`)
+  return jsonOrThrow(res)
+}
+
+/** 插入影像。rect 為 view-space points（左上原點），與裁切/註解座標系一致。 */
+export async function insertImage(id: string, page: number, file: File, rect: Rect): Promise<Mutated> {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('x', String(rect.x))
+  form.append('y', String(rect.y))
+  form.append('w', String(rect.w))
+  form.append('h', String(rect.h))
+  const res = await fetch(`/api/documents/${id}/pages/${page}/images`, { method: 'POST', body: form })
+  return jsonOrThrow(res)
+}
+
+/** 取代指定 index 的影像物件。index 為該頁影像清單中的位置，任何頁面變更後需重新 GET。 */
+export async function replaceImage(id: string, page: number, index: number, file: File): Promise<Mutated> {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await fetch(`/api/documents/${id}/pages/${page}/images/${index}`, {
+    method: 'POST',
+    body: form,
+  })
+  return jsonOrThrow(res)
+}
+
+// ---------- 匯出（Phase 8）----------
+
+export type ExportFormat = 'png' | 'jpg' | 'tiff' | 'pptx' | 'docx' | 'xlsx'
+
+export interface ExportOptions {
+  format: ExportFormat
+  /** 0-based 頁碼；省略＝全部頁面。 */
+  pages?: number[]
+  /** docx／xlsx 為文字／表格轉換，後端會忽略此欄位，可省略。 */
+  dpi?: number
+  /** 僅 format 為 jpg 時後端會讀取；其餘格式可省略。 */
+  quality?: number
+}
+
+/** 從 Content-Disposition 解析檔名：優先 RFC 5987 的 filename*=UTF-8''<encoded>，
+ *  其次退回一般 filename="..."，都沒有就用 export.<fallbackExt>。 */
+function parseFilenameFromDisposition(header: string | null, fallbackExt: string): string {
+  if (header) {
+    const starMatch = header.match(/filename\*\s*=\s*UTF-8''([^;]+)/i)
+    if (starMatch) {
+      try {
+        return decodeURIComponent(starMatch[1].trim())
+      } catch {
+        // 解碼失敗則退回下面的 plain filename／fallback
+      }
+    }
+    const plainMatch = header.match(/filename\s*=\s*"?([^";]+)"?/i)
+    if (plainMatch) return plainMatch[1].trim()
+  }
+  return `export.${fallbackExt}`
+}
+
+/** 匯出文件為圖片／簡報／Office 文件並觸發瀏覽器下載。PNG/JPG 多頁由後端打包成 zip，TIFF 為單一多頁檔，
+ *  PPTX 每頁一張投影片，DOCX／XLSX 為文字／表格轉換（不套用 dpi／quality）。 */
+export async function exportDocument(id: string, opts: ExportOptions): Promise<void> {
+  const body: Record<string, unknown> = { format: opts.format }
+  if (opts.pages !== undefined) body.pages = opts.pages
+  if (opts.dpi !== undefined) body.dpi = opts.dpi
+  if (opts.format === 'jpg' && opts.quality !== undefined) body.quality = opts.quality
+
+  const res = await fetch(`/api/documents/${id}/export`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error(errBody.error ?? res.statusText)
+  }
+  const blob = await res.blob()
+  const filename = parseFilenameFromDisposition(res.headers.get('Content-Disposition'), opts.format)
+
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
+// ---------- 壓縮（Phase 9）----------
+
+export type CompressPreset = 'screen' | 'ebook' | 'printer' | 'custom'
+
+export interface CompressOptions {
+  preset: CompressPreset
+  /** 僅 preset 為 custom 時後端會讀取；範圍 36–600。 */
+  dpi?: number
+  /** 僅 preset 為 custom 時後端會讀取；範圍 10–100。 */
+  quality?: number
+  /** 可選；省略則後端預設為 compressed_<原檔名>。 */
+  filename?: string
+}
+
+export interface CompressStats {
+  images_recompressed: number
+  images_skipped: number
+  duplicates_merged: number
+  objects_pruned: number
+}
+
+export interface CompressResult {
+  document: DocMeta
+  before: number
+  after: number
+  stats: CompressStats
+}
+
+export async function compressDocument(id: string, opts: CompressOptions): Promise<CompressResult> {
+  const body: Record<string, unknown> = { preset: opts.preset }
+  if (opts.preset === 'custom') {
+    if (opts.dpi !== undefined) body.dpi = opts.dpi
+    if (opts.quality !== undefined) body.quality = opts.quality
+  }
+  if (opts.filename !== undefined) body.filename = opts.filename
+
+  const res = await fetch(`/api/documents/${id}/compress`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return jsonOrThrow(res)
+}
+
+// ---------- 保護（Phase 11）----------
+
+export interface PermissionFlags {
+  print: boolean
+  printHighQuality: boolean
+  modify: boolean
+  copy: boolean
+  copyForAccessibility: boolean
+  annotate: boolean
+  fillForms: boolean
+  assemble: boolean
+}
+
+export interface ProtectionStatus {
+  protected: boolean
+  permissions: PermissionFlags | null
+}
+
+export async function getProtectionStatus(id: string): Promise<ProtectionStatus> {
+  const res = await fetch(`/api/documents/${id}/protection`)
+  return jsonOrThrow(res)
+}
+
+export async function protectDocument(
+  id: string,
+  ownerPassword: string,
+  permissions: PermissionFlags,
+  filename?: string,
+): Promise<{ document: DocMeta }> {
+  const body: Record<string, unknown> = { ownerPassword, permissions }
+  if (filename !== undefined) body.filename = filename
+
+  const res = await fetch(`/api/documents/${id}/protect`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return jsonOrThrow(res)
+}
+
+export async function unprotectDocument(
+  id: string,
+  password: string,
+  filename?: string,
+): Promise<{ document: DocMeta }> {
+  const body: Record<string, unknown> = { password }
+  if (filename !== undefined) body.filename = filename
+
+  const res = await fetch(`/api/documents/${id}/unprotect`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return jsonOrThrow(res)
+}
+
+// ---------- 密文（Phase 12）----------
+//
+// 與 Phase 11「保護」不同：這裡是真正的開檔密碼加密，加密後的檔案沒有密碼
+// 連本編輯器自己都無法開啟／渲染。因此加密／解密都是「只下載、不存回文件庫」
+// 的操作（跟 exportDocument 完全一樣的下載機制），原文件維持不變、仍可檢視。
+
+export interface EncryptOptions {
+  userPassword: string
+  /** 省略則後端預設同 userPassword。 */
+  ownerPassword?: string
+  /** 省略則後端預設全部允許。 */
+  permissions?: PermissionFlags
+  /** 可選；省略則後端預設為 encrypted_<原檔名>。 */
+  filename?: string
+}
+
+/** 觸發瀏覽器下載一個 blob（沿用 exportDocument 的下載機制）。 */
+function triggerDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
+/** 為文件加上開檔密碼並下載加密後的副本；不會存回文件庫，原文件不受影響。 */
+export async function encryptDocument(id: string, opts: EncryptOptions): Promise<void> {
+  const body: Record<string, unknown> = { userPassword: opts.userPassword }
+  if (opts.ownerPassword !== undefined) body.ownerPassword = opts.ownerPassword
+  if (opts.permissions !== undefined) body.permissions = opts.permissions
+  if (opts.filename !== undefined) body.filename = opts.filename
+
+  const res = await fetch(`/api/documents/${id}/encrypt`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error(errBody.error ?? res.statusText)
+  }
+  const blob = await res.blob()
+  const filename = parseFilenameFromDisposition(res.headers.get('Content-Disposition'), 'pdf')
+  triggerDownload(blob, filename)
+}
+
+/** 用開檔密碼解密文件並下載解密後的副本；不會存回文件庫，原文件不受影響。 */
+export async function decryptDocument(id: string, password: string, filename?: string): Promise<void> {
+  const body: Record<string, unknown> = { password }
+  if (filename !== undefined) body.filename = filename
+
+  const res = await fetch(`/api/documents/${id}/decrypt`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error(errBody.error ?? res.statusText)
+  }
+  const blob = await res.blob()
+  const outFilename = parseFilenameFromDisposition(res.headers.get('Content-Disposition'), 'pdf')
+  triggerDownload(blob, outFilename)
+}

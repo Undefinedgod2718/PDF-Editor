@@ -1,0 +1,39 @@
+[package]
+name = "pdf-editor-mcp-server"
+version = "0.1.0"
+edition = "2021"
+
+# Standalone crate: this repo has no workspace Cargo.toml at the root, and
+# `server/` is a separate, independently-built crate. Keep it that way — do
+# not fold this into a workspace with `server/`.
+
+[[bin]]
+name = "pdf-editor-mcp-server"
+path = "src/main.rs"
+
+[dependencies]
+# Official Rust MCP SDK. "macros" gives #[tool]/#[tool_router]/#[tool_handler];
+# "transport-io" gives the stdio transport; "schemars" re-exports the
+# JsonSchema derive used for tool parameter structs.
+rmcp = { version = "2.2.0", features = ["server", "macros", "transport-io", "schemars"] }
+# Matches rmcp's bundled schemars major version (see rmcp's own examples,
+# which also depend on it directly alongside `rmcp::schemars`).
+schemars = "1.0"
+
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "signal", "time", "fs"] }
+
+# Pure HTTP client forwarding to the PDF Editor backend; rustls avoids an
+# OpenSSL/native-tls build dependency on Windows. TLS is not actually needed
+# for the default http://127.0.0.1 base URL, but is kept in case a caller
+# points PDF_EDITOR_URL at an https endpoint.
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[profile.release]
+lto = true
+strip = true

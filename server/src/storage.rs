@@ -13,6 +13,23 @@ pub struct DocMeta {
     /// (`?v=N`) so page images can be cached as immutable.
     #[serde(default)]
     pub revision: u64,
+    /// SHA-256 hex digest of the owner password set by `/protect`, or `None`
+    /// if the document isn't protected (or was protected outside this app).
+    /// A PDF with an empty user password auto-decrypts on load in any
+    /// reader (including our own `lopdf`), so the on-disk `/Encrypt`
+    /// dictionary alone can't validate the owner password later — this
+    /// hash is what `/unprotect` actually checks the caller's password
+    /// against. Never return this over the API; use [`DocMeta::for_client`].
+    #[serde(default)]
+    pub protection_hash: Option<String>,
+}
+
+impl DocMeta {
+    /// Drop secrets before serializing metadata into an HTTP response.
+    pub fn for_client(mut self) -> Self {
+        self.protection_hash = None;
+        self
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -76,7 +93,17 @@ impl Storage {
         self.root.join(format!("{id}.json"))
     }
 
-    pub fn save(&self, filename: String, bytes: &[u8]) -> anyhow::Result<DocMeta> {
+    /// Persist a new PDF and its sidecar metadata. `protection_hash` is written
+    /// in the same sidecar write as the rest of `DocMeta` so a crash between
+    /// PDF write and hash update cannot leave a protected file without a
+    /// verifier (which would force `/unprotect` to refuse — safer than a
+    /// password bypass, but still a stuck document).
+    pub fn save(
+        &self,
+        filename: String,
+        bytes: &[u8],
+        protection_hash: Option<String>,
+    ) -> anyhow::Result<DocMeta> {
         let id = Uuid::new_v4();
         std::fs::write(self.pdf_path(id), bytes)?;
         let meta = DocMeta {
@@ -84,6 +111,7 @@ impl Storage {
             filename,
             size: bytes.len() as u64,
             revision: 0,
+            protection_hash,
         };
         std::fs::write(self.meta_path(id), serde_json::to_string(&meta)?)?;
         self.docs.insert(id, meta.clone());

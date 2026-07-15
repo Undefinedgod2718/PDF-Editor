@@ -13,6 +13,16 @@ interface Props {
   openFile: (f: File) => void
   cropMode: boolean
   toggleCrop: () => void
+  imageMode: boolean
+  toggleImageMode: () => void
+  showExport: boolean
+  toggleExport: () => void
+  showCompress: boolean
+  toggleCompress: () => void
+  showProtect: boolean
+  toggleProtect: () => void
+  showEncrypt: boolean
+  toggleEncrypt: () => void
 }
 
 const ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]
@@ -30,6 +40,16 @@ export default function Toolbar({
   openFile,
   cropMode,
   toggleCrop,
+  imageMode,
+  toggleImageMode,
+  showExport,
+  toggleExport,
+  showCompress,
+  toggleCompress,
+  showProtect,
+  toggleProtect,
+  showEncrypt,
+  toggleEncrypt,
 }: Props) {
   const zoomIn = () => {
     const next = ZOOM_STEPS.find((z) => z > scale + 0.001)
@@ -123,6 +143,21 @@ export default function Toolbar({
         </button>
         <button className={`tb-btn ${cropMode ? 'active' : ''}`} title="裁切" onClick={toggleCrop}>
           裁切
+        </button>
+        <button className={`tb-btn ${imageMode ? 'active' : ''}`} title="影像" onClick={toggleImageMode}>
+          影像
+        </button>
+        <button className={`tb-btn ${showExport ? 'active' : ''}`} title="匯出" onClick={toggleExport}>
+          匯出
+        </button>
+        <button className={`tb-btn ${showCompress ? 'active' : ''}`} title="壓縮" onClick={toggleCompress}>
+          壓縮
+        </button>
+        <button className={`tb-btn ${showProtect ? 'active' : ''}`} title="保護" onClick={toggleProtect}>
+          保護
+        </button>
+        <button className={`tb-btn ${showEncrypt ? 'active' : ''}`} title="加密" onClick={toggleEncrypt}>
+          加密
         </button>
       </div>
     </div>
