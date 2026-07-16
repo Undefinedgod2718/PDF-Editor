@@ -310,6 +310,8 @@ export interface FormField {
   /** 後端取不到 widget bounds 時為 null，前端須過濾。 */
   rect: Rect | null
   writable: boolean
+  /** AcroForm `/Ff` Required bit。 */
+  required: boolean
 }
 
 export async function fetchDocForm(id: string): Promise<FormField[]> {

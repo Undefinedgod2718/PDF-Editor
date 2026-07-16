@@ -21,13 +21,21 @@ const DEFAULT_MODEL: &str = "claude-haiku-4-5";
 /// Cap on how many per-page text-change excerpts go into the prompt, so a
 /// huge diff doesn't blow up the token count (or the summary's own budget).
 const MAX_EXCERPTS: usize = 50;
+/// Bound a hung Anthropic call so `/compare` still returns the rest of the report.
+const LLM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
 
 pub async fn summarize_diff(report: &CompareReport) -> Option<String> {
     let api_key = std::env::var("ANTHROPIC_API_KEY").ok()?;
     let model = std::env::var("ANTHROPIC_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.into());
     let prompt = build_prompt(report);
 
-    let client = reqwest::Client::new();
+    let client = match reqwest::Client::builder().timeout(LLM_TIMEOUT).build() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("LLM client build failed: {e}");
+            return None;
+        }
+    };
     let body = serde_json::json!({
         "model": model,
         "max_tokens": 700,

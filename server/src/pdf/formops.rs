@@ -28,6 +28,8 @@ pub struct FieldInfo {
     pub rect: Option<super::annots::OutRect>,
     /// Whether this backend can write the field (text/checkbox/radio).
     pub writable: bool,
+    /// AcroForm `/Ff` bit 1 (`Required`).
+    pub required: bool,
 }
 
 #[derive(Deserialize)]
@@ -51,6 +53,7 @@ fn field_info(
     annot_index: usize,
     field: &PdfFormField,
     rect: Option<super::annots::OutRect>,
+    required: bool,
 ) -> FieldInfo {
     let (value, checked, options, writable) = match field {
         PdfFormField::Text(t) => (t.value(), None, None, true),
@@ -70,16 +73,18 @@ fn field_info(
         options,
         rect,
         writable,
+        required,
     }
 }
 
 /// `path` is still needed alongside the open document: button checked-state
-/// is read from the raw file via lopdf (see below).
+/// and `/Ff` Required are read from the raw file via lopdf (see below).
 pub fn list_fields(doc: &PdfDocument, path: &Path) -> anyhow::Result<Vec<FieldInfo>> {
     // pdfium's is_checked() misreports unfilled radio groups as checked
     // (third-party verification finding), so button checked-state comes from
     // each widget's /AS name read via lopdf instead.
     let as_states = button_as_states(path).unwrap_or_default();
+    let required_flags = field_required_flags(path).unwrap_or_default();
     let mut out = Vec::new();
     for (page_index, page) in doc.pages().iter().enumerate() {
         let page_height = page.height().value;
@@ -92,7 +97,12 @@ pub fn list_fields(doc: &PdfDocument, path: &Path) -> anyhow::Result<Vec<FieldIn
                         w: b.right().value - b.left().value,
                         h: b.top().value - b.bottom().value,
                     });
-                    let mut info = field_info(page_index as u16, annot_index, field, rect);
+                    let required = required_flags
+                        .get(&(page_index as u16, annot_index))
+                        .copied()
+                        .unwrap_or(false);
+                    let mut info =
+                        field_info(page_index as u16, annot_index, field, rect, required);
                     if matches!(
                         field,
                         PdfFormField::Checkbox(_) | PdfFormField::RadioButton(_)
@@ -103,6 +113,50 @@ pub fn list_fields(doc: &PdfDocument, path: &Path) -> anyhow::Result<Vec<FieldIn
                     out.push(info);
                 }
             }
+        }
+    }
+    Ok(out)
+}
+
+/// PDF AcroForm Required flag (`/Ff` bit 1).
+const FF_REQUIRED: i64 = 1 << 1;
+
+/// For every page widget, whether its field dictionary (parent for radio
+/// kids, else the widget itself) has `/Ff` Required set.
+fn field_required_flags(
+    path: &Path,
+) -> anyhow::Result<std::collections::HashMap<(u16, usize), bool>> {
+    use lopdf::Document;
+    let doc = Document::load(path)?;
+    let mut out = std::collections::HashMap::new();
+    for (page_no, page_id) in doc.get_pages() {
+        let Ok(page) = doc.get_dictionary(page_id) else {
+            continue;
+        };
+        let Some(annots) = page.get(b"Annots").ok().and_then(|a| resolve_array(&doc, a)) else {
+            continue;
+        };
+        for (i, entry) in annots.iter().enumerate() {
+            let Some(annot_id) = entry.as_reference().ok() else {
+                // Inline annot dictionaries are rare; skip rather than guess.
+                continue;
+            };
+            let Ok(annot) = doc.get_dictionary(annot_id) else {
+                continue;
+            };
+            // Field flags live on the parent for radio kids; otherwise on the
+            // merged field+widget dictionary.
+            let field_id = annot
+                .get(b"Parent")
+                .ok()
+                .and_then(|p| p.as_reference().ok())
+                .unwrap_or(annot_id);
+            let ff = doc
+                .get_dictionary(field_id)
+                .ok()
+                .and_then(|d| d.get(b"Ff").ok().and_then(|o| o.as_i64().ok()))
+                .unwrap_or(0);
+            out.insert((page_no as u16 - 1, i), ff & FF_REQUIRED != 0);
         }
     }
     Ok(out)

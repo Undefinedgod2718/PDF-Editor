@@ -147,6 +147,17 @@ pub fn create_field(
                 .iter()
                 .map(|o| flip_rect(&o.rect, &media))
                 .collect::<Result<_, _>>()?;
+            // flip_rect clamps each option independently; if the client sent
+            // options past the page bottom they all collapse onto the same Y
+            // and overlap. Refuse that instead of writing a broken group.
+            for pair in rects.windows(2) {
+                let gap = (pair[0][1] - pair[1][1]).abs();
+                if gap < 1.0 {
+                    return user_err(
+                        "radio options overlap or extend past the page; shrink the field or use fewer options",
+                    );
+                }
+            }
             create_radio_group(&mut doc, page_id, name, options, &rects, *required)?;
         }
         _ => {

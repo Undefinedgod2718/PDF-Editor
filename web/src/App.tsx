@@ -547,6 +547,7 @@ export default function App() {
             mode="create"
             docId={doc.id}
             page={pendingField.page}
+            pageHeight={doc.pages[pendingField.page]?.height ?? 792}
             fieldType={builderFieldType}
             rectPt={pendingField.rect}
             onClose={() => setPendingField(null)}

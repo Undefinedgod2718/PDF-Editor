@@ -27,6 +27,8 @@ type Props =
       mode: 'create'
       docId: string
       page: number
+      /** 頁面高度（view-space points），radio 選項排列不可超出此邊界。 */
+      pageHeight: number
       fieldType: BuilderFieldType
       /** 頁面上拖曳出的矩形（view-space points，左上原點）。 */
       rectPt: Rect
@@ -54,6 +56,34 @@ function normalizedType(field: FormField): string {
   return field.fieldType.toLowerCase()
 }
 
+/**
+ * 將 radio 選項排進頁面：優先自拖曳矩形往下堆；若超出頁底則改往上堆。
+ * 兩者皆放不下時回傳 null（呼叫端應提示使用者縮小欄位或減少選項）。
+ */
+function layoutRadioOptions(base: Rect, count: number, pageHeight: number): Rect[] | null {
+  const step = base.h + RADIO_GAP_PT
+  const totalH = count * base.h + (count - 1) * RADIO_GAP_PT
+  const fitsDown = base.y + totalH <= pageHeight + 1e-6
+  if (fitsDown) {
+    return Array.from({ length: count }, (_, i) => ({
+      x: base.x,
+      y: base.y + i * step,
+      w: base.w,
+      h: base.h,
+    }))
+  }
+  const topY = base.y + base.h - totalH
+  if (topY >= -1e-6) {
+    return Array.from({ length: count }, (_, i) => ({
+      x: base.x,
+      y: topY + i * step,
+      w: base.w,
+      h: base.h,
+    }))
+  }
+  return null
+}
+
 export default function FieldDialog(props: Props) {
   const isEdit = props.mode === 'edit'
   const editType = isEdit ? normalizedType(props.field) : null
@@ -67,7 +97,7 @@ export default function FieldDialog(props: Props) {
   const isText = !isEdit && createType === 'text'
 
   const [name, setName] = useState(isEdit ? props.field.name : '')
-  const [required, setRequired] = useState(false)
+  const [required, setRequired] = useState(isEdit ? props.field.required : false)
   const [requiredDirty, setRequiredDirty] = useState(false)
   const [multiline, setMultiline] = useState(false)
   const [fontSize, setFontSize] = useState(12)
@@ -108,15 +138,16 @@ export default function FieldDialog(props: Props) {
         setError('單選群組至少需要 2 個選項')
         return
       }
-      const rect = props.rectPt
+      const laidOut = layoutRadioOptions(props.rectPt, opts.length, props.pageHeight)
+      if (!laidOut) {
+        setError('選項放不下此頁；請縮小欄位高度或減少選項')
+        return
+      }
       field = {
         fieldType: 'radio',
         name: trimmedName,
         required,
-        options: opts.map((value, i) => ({
-          value,
-          rect: { x: rect.x, y: rect.y + i * (rect.h + RADIO_GAP_PT), w: rect.w, h: rect.h },
-        })),
+        options: opts.map((value, i) => ({ value, rect: laidOut[i] })),
       }
     } else {
       // combobox / listbox

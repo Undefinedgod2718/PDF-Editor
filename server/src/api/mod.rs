@@ -17,6 +17,7 @@ use crate::llm;
 
 pub fn router() -> Router<SharedState> {
     Router::new()
+        .route("/api/health", get(health))
         .route("/api/documents", post(upload).get(list_docs))
         .route("/api/documents/{id}/info", get(doc_info))
         .route("/api/documents/{id}/pages/{page}/render", get(render_page))
@@ -113,6 +114,21 @@ impl From<anyhow::Error> for ApiError {
 
 fn not_found() -> ApiError {
     ApiError(StatusCode::NOT_FOUND, "document not found".into())
+}
+
+/// Liveness + dependency probe. `sidecar.ok=false` means docx/xlsx export is
+/// broken (missing Python interpreter or convert.py) — poll this from log/
+/// monitoring scripts instead of waiting for a user-facing 500.
+async fn health() -> impl IntoResponse {
+    let sidecar_status = match sidecar::health() {
+        Ok((python, script)) => serde_json::json!({
+            "ok": true,
+            "python": python.display().to_string(),
+            "script": script.display().to_string(),
+        }),
+        Err(e) => serde_json::json!({ "ok": false, "error": e }),
+    };
+    Json(serde_json::json!({ "status": "ok", "sidecar": sidecar_status }))
 }
 
 async fn upload(
@@ -931,11 +947,26 @@ async fn compare_documents(
     let filename = body
         .filename
         .unwrap_or_else(|| format!("compare_{}_vs_{}", old_meta.filename, new_meta.filename));
-    let out_meta = state.storage.save(filename, &bytes, None)?;
-    // pdfium can't write /NM; stamp stable ids in a lopdf pass, same as
-    // create_annotation — the annotations burned in by compare::compare
-    // still need it for the per-page annotation UI to address them later.
-    annots::ensure_annotation_names(&state.storage.pdf_path(out_meta.id))?;
+    // pdfium can't write /NM; stamp on a temp file *before* library save so a
+    // failed lopdf pass never leaves a half-registered document (unlike
+    // create_annotation which mutates an already-owned path in place).
+    let tmp = std::env::temp_dir().join(format!("pdf-editor-compare-{}.pdf", Uuid::new_v4()));
+    std::fs::write(&tmp, &bytes).map_err(|e| {
+        ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+    })?;
+    let named_bytes = match annots::ensure_annotation_names(&tmp).and_then(|_| {
+        std::fs::read(&tmp).map_err(anyhow::Error::from)
+    }) {
+        Ok(b) => {
+            let _ = std::fs::remove_file(&tmp);
+            b
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e.into());
+        }
+    };
+    let out_meta = state.storage.save(filename, &named_bytes, None)?;
 
     if body.llm_summary {
         report.summary = llm::summarize_diff(&report).await;
