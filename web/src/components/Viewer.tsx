@@ -10,7 +10,9 @@ import AnnotLayer from './AnnotLayer'
 import FormLayer from './FormLayer'
 import CropLayer from './CropLayer'
 import ImageLayer from './ImageLayer'
+import FormBuilderLayer from './FormBuilderLayer'
 import type { AnnotTool } from './AnnotToolbar'
+import type { BuilderFieldType } from './FormBuilderBar'
 
 interface FlashTarget {
   page: number
@@ -50,6 +52,16 @@ interface Props {
   insertNaturalPt: { w: number; h: number } | null
   /** 插入影像拖曳／點擊放置完成後回呼，帶出 view-space points 矩形。 */
   onInsertRectChange: (rectPt: Rect) => void
+  /** 表單建立模式是否啟用（Toolbar「建立表單」按鈕）。啟用時目前頁面用 FormBuilderLayer 取代 FormLayer。 */
+  formBuilderMode: boolean
+  /** FormBuilderBar 目前選取的欄位型別，僅供新拖曳出的欄位使用。 */
+  builderFieldType: BuilderFieldType
+  /** 拖曳畫出新欄位範圍完成回呼（view-space points）。 */
+  onBuilderCreateRect: (rectPt: Rect) => void
+  /** 表單欄位建立/修改/刪除成功後回呼，通知上層重新抓表單欄位＋bump 該頁渲染版本。 */
+  onFormFieldsChanged: () => void
+  /** 雙擊既有欄位框，開啟編輯 dialog。 */
+  onEditFormField: (field: FormField) => void
 }
 
 export interface ViewerHandle {
@@ -82,6 +94,11 @@ const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(
     insertArmed,
     insertNaturalPt,
     onInsertRectChange,
+    formBuilderMode,
+    builderFieldType,
+    onBuilderCreateRect,
+    onFormFieldsChanged,
+    onEditFormField,
   },
   ref,
 ) {
@@ -194,13 +211,26 @@ const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(
               flashRect={flash && flash.page === page.index ? flash.rect : null}
               flashKey={flash?.key ?? 0}
             />
-            {tool === 'form' && (
-              <FormLayer
+            {formBuilderMode && page.index === currentPage ? (
+              <FormBuilderLayer
                 docId={doc.id}
+                page={page.index}
                 scale={scale}
                 fields={formFields.filter((f) => f.page === page.index)}
-                onFieldChanged={onFormFieldChanged}
+                selectedType={builderFieldType}
+                onCreateRect={onBuilderCreateRect}
+                onFieldsChanged={onFormFieldsChanged}
+                onEditField={onEditFormField}
               />
+            ) : (
+              tool === 'form' && (
+                <FormLayer
+                  docId={doc.id}
+                  scale={scale}
+                  fields={formFields.filter((f) => f.page === page.index)}
+                  onFieldChanged={onFormFieldChanged}
+                />
+              )
             )}
             {cropMode && page.index === currentPage && (
               <CropLayer scale={scale} onRectChange={onCropRectChange} />

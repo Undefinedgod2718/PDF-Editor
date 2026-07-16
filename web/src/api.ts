@@ -331,6 +331,62 @@ export async function setFormFieldValue(
   return jsonOrThrow(res)
 }
 
+// ---------- 表單建立（P14）----------
+
+/** POST .../form 的請求體，比照 annots.ts CreateAnnotationRequest 的 tag 風格。
+ *  rect 一律 points、左上原點，與 annotations 相同約定。 */
+export type NewFormField =
+  | {
+      fieldType: 'text'
+      name: string
+      rect: Rect
+      multiline?: boolean
+      required?: boolean
+      fontSize?: number
+      defaultValue?: string
+    }
+  | { fieldType: 'checkbox'; name: string; rect: Rect; required?: boolean }
+  | { fieldType: 'radio'; name: string; options: { value: string; rect: Rect }[]; required?: boolean }
+  | { fieldType: 'combobox'; name: string; rect: Rect; options: string[]; required?: boolean }
+  | { fieldType: 'listbox'; name: string; rect: Rect; options: string[]; required?: boolean }
+  | { fieldType: 'signature'; name: string; rect: Rect }
+
+/** PATCH .../form/{index} 的請求體；至少帶一個鍵。 */
+export interface FormFieldUpdate {
+  rect?: Rect
+  name?: string
+  options?: string[]
+  required?: boolean
+}
+
+export async function createFormField(id: string, page: number, field: NewFormField): Promise<Mutated> {
+  const res = await fetch(`/api/documents/${id}/pages/${page}/form`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(field),
+  })
+  return jsonOrThrow(res)
+}
+
+export async function updateFormField(
+  id: string,
+  page: number,
+  index: number,
+  update: FormFieldUpdate,
+): Promise<Mutated> {
+  const res = await fetch(`/api/documents/${id}/pages/${page}/form/${index}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(update),
+  })
+  return jsonOrThrow(res)
+}
+
+export async function deleteFormField(id: string, page: number, index: number): Promise<Mutated> {
+  const res = await fetch(`/api/documents/${id}/pages/${page}/form/${index}`, { method: 'DELETE' })
+  return jsonOrThrow(res)
+}
+
 // ---------- 頁面幾何（Phase 6）----------
 
 export type ResizeMode = 'scale' | 'canvas'

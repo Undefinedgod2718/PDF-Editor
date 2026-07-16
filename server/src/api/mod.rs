@@ -8,7 +8,8 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::pdf::{
-    annots, compare, compress, exportops, formops, imageops, objects, ops, pageops, protect,
+    annots, compare, compress, exportops, formbuild, formops, imageops, objects, ops, pageops,
+    protect,
 };
 use crate::sidecar;
 use crate::SharedState;
@@ -74,8 +75,14 @@ pub fn router() -> Router<SharedState> {
         )
         .route("/api/documents/{id}/form", get(list_form_fields))
         .route(
+            "/api/documents/{id}/pages/{page}/form",
+            post(create_form_field),
+        )
+        .route(
             "/api/documents/{id}/pages/{page}/form/{index}",
-            post(set_form_field),
+            post(set_form_field)
+                .patch(update_form_field)
+                .delete(delete_form_field),
         )
         .route("/api/stamps", post(upload_stamp).get(list_stamps))
         .route(
@@ -476,6 +483,111 @@ async fn set_form_field(
             Ok(())
         })
         .await?;
+    let revision = state.storage.bump_revision(id)?;
+    Ok(Json(serde_json::json!({ "ok": true, "revision": revision })))
+}
+
+/// Wraps `formbuild::FormBuildError` so it can cross `engine.run`'s
+/// `anyhow::Result<T>` boundary (the closure signature is fixed to
+/// `anyhow::Result`, unlike the `spawn_blocking` jobs the protect/encrypt
+/// handlers use) and be downcast back into its typed User/Internal variant
+/// afterwards, mirroring `map_protect_err`'s handling of `ProtectError`.
+struct FormBuildErrWrap(formbuild::FormBuildError);
+
+impl std::fmt::Debug for FormBuildErrWrap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.0 {
+            formbuild::FormBuildError::User(msg) => write!(f, "{msg}"),
+            formbuild::FormBuildError::Internal(err) => write!(f, "{err:?}"),
+        }
+    }
+}
+
+impl std::fmt::Display for FormBuildErrWrap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.0 {
+            formbuild::FormBuildError::User(msg) => write!(f, "{msg}"),
+            formbuild::FormBuildError::Internal(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+impl std::error::Error for FormBuildErrWrap {}
+
+fn map_formbuild_err(e: anyhow::Error) -> ApiError {
+    match e.downcast::<FormBuildErrWrap>() {
+        Ok(FormBuildErrWrap(formbuild::FormBuildError::User(msg))) => {
+            ApiError(StatusCode::BAD_REQUEST, msg)
+        }
+        Ok(FormBuildErrWrap(formbuild::FormBuildError::Internal(err))) => {
+            tracing::error!("form build failed: {err:#}");
+            ApiError(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "form field operation failed".into(),
+            )
+        }
+        Err(e) => ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+async fn create_form_field(
+    State(state): State<SharedState>,
+    Path((id, page)): Path<(Uuid, u16)>,
+    Json(body): Json<formbuild::NewField>,
+) -> Result<impl IntoResponse, ApiError> {
+    state.storage.get(id).ok_or_else(not_found)?;
+    let path = state.storage.pdf_path(id);
+    state
+        .engine
+        .run(move |_pdfium, cache| {
+            formbuild::create_field(&path, page, &body)
+                .map_err(|e| anyhow::Error::new(FormBuildErrWrap(e)))?;
+            cache.invalidate(&path);
+            Ok(())
+        })
+        .await
+        .map_err(map_formbuild_err)?;
+    let revision = state.storage.bump_revision(id)?;
+    Ok(Json(serde_json::json!({ "ok": true, "revision": revision })))
+}
+
+async fn update_form_field(
+    State(state): State<SharedState>,
+    Path((id, page, index)): Path<(Uuid, u16, usize)>,
+    Json(body): Json<formbuild::FieldUpdate>,
+) -> Result<impl IntoResponse, ApiError> {
+    state.storage.get(id).ok_or_else(not_found)?;
+    let path = state.storage.pdf_path(id);
+    state
+        .engine
+        .run(move |_pdfium, cache| {
+            formbuild::update_field(&path, page, index, &body)
+                .map_err(|e| anyhow::Error::new(FormBuildErrWrap(e)))?;
+            cache.invalidate(&path);
+            Ok(())
+        })
+        .await
+        .map_err(map_formbuild_err)?;
+    let revision = state.storage.bump_revision(id)?;
+    Ok(Json(serde_json::json!({ "ok": true, "revision": revision })))
+}
+
+async fn delete_form_field(
+    State(state): State<SharedState>,
+    Path((id, page, index)): Path<(Uuid, u16, usize)>,
+) -> Result<impl IntoResponse, ApiError> {
+    state.storage.get(id).ok_or_else(not_found)?;
+    let path = state.storage.pdf_path(id);
+    state
+        .engine
+        .run(move |_pdfium, cache| {
+            formbuild::delete_field(&path, page, index)
+                .map_err(|e| anyhow::Error::new(FormBuildErrWrap(e)))?;
+            cache.invalidate(&path);
+            Ok(())
+        })
+        .await
+        .map_err(map_formbuild_err)?;
     let revision = state.storage.bump_revision(id)?;
     Ok(Json(serde_json::json!({ "ok": true, "revision": revision })))
 }

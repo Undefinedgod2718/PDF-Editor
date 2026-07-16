@@ -15,6 +15,8 @@ interface Props {
   toggleCrop: () => void
   imageMode: boolean
   toggleImageMode: () => void
+  formBuilderMode: boolean
+  toggleFormBuilder: () => void
   showExport: boolean
   toggleExport: () => void
   showCompress: boolean
@@ -44,6 +46,8 @@ export default function Toolbar({
   toggleCrop,
   imageMode,
   toggleImageMode,
+  formBuilderMode,
+  toggleFormBuilder,
   showExport,
   toggleExport,
   showCompress,
@@ -150,6 +154,13 @@ export default function Toolbar({
         </button>
         <button className={`tb-btn ${imageMode ? 'active' : ''}`} title="影像" onClick={toggleImageMode}>
           影像
+        </button>
+        <button
+          className={`tb-btn ${formBuilderMode ? 'active' : ''}`}
+          title="建立表單"
+          onClick={toggleFormBuilder}
+        >
+          📝
         </button>
         <button className={`tb-btn ${showExport ? 'active' : ''}`} title="匯出" onClick={toggleExport}>
           匯出

@@ -29,6 +29,8 @@ import ProtectDialog from './components/ProtectDialog'
 import EncryptDialog from './components/EncryptDialog'
 import DecryptPrompt from './components/DecryptPrompt'
 import CompareDialog from './components/CompareDialog'
+import FormBuilderBar, { type BuilderFieldType } from './components/FormBuilderBar'
+import FieldDialog from './components/FieldDialog'
 
 interface FlashTarget {
   page: number
@@ -73,6 +75,14 @@ export default function App() {
   const [insertNaturalPt, setInsertNaturalPt] = useState<{ w: number; h: number } | null>(null)
   const [insertRect, setInsertRect] = useState<Rect | null>(null)
 
+  // ---- 表單建立相關狀態（Phase 14）----
+  const [formBuilderMode, setFormBuilderMode] = useState(false)
+  const [builderFieldType, setBuilderFieldType] = useState<BuilderFieldType>('text')
+  /** 拖曳畫出的新欄位範圍，非 null 時開啟 FieldDialog（create 模式）。 */
+  const [pendingField, setPendingField] = useState<{ page: number; rect: Rect } | null>(null)
+  /** 雙擊選取的既有欄位，非 null 時開啟 FieldDialog（edit 模式）。 */
+  const [editingField, setEditingField] = useState<FormField | null>(null)
+
   // ---- 匯出對話框相關狀態（Phase 8）----
   const [showExport, setShowExport] = useState(false)
 
@@ -102,6 +112,8 @@ export default function App() {
   useEffect(() => {
     setCropRect(null)
     resetImageInteraction()
+    setPendingField(null)
+    setEditingField(null)
   }, [currentPage, resetImageInteraction])
 
   // 載入文件（開啟本地檔案／合併或擷取後切換開啟）共用的重置邏輯。
@@ -124,6 +136,10 @@ export default function App() {
     setInsertArmed(false)
     setInsertNaturalPt(null)
     setInsertRect(null)
+    setFormBuilderMode(false)
+    setBuilderFieldType('text')
+    setPendingField(null)
+    setEditingField(null)
     setShowExport(false)
     setShowCompress(false)
     setShowProtect(false)
@@ -242,9 +258,9 @@ export default function App() {
     viewerRef.current?.scrollToRect(page, rect)
   }, [])
 
-  // 表單工具選中時，抓一次全文件欄位（含每頁 rect）。
+  // 表單工具選中、或表單建立模式啟用時，抓一次全文件欄位（含每頁 rect）。
   useEffect(() => {
-    if (tool !== 'form' || !doc) return
+    if ((tool !== 'form' && !formBuilderMode) || !doc) return
     let cancelled = false
     fetchDocForm(doc.id)
       .then((fields) => {
@@ -256,7 +272,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [tool, doc])
+  }, [tool, formBuilderMode, doc])
 
   // 表單欄位寫入成功後：重新抓整份文件欄位（radio 群組等連動狀態才會同步），並 bump 該頁版本讓渲染圖重新烙值。
   const onFormFieldChanged = useCallback(
@@ -270,6 +286,18 @@ export default function App() {
     [doc, bumpPageVersion],
   )
 
+  // 表單建立模式：建立/修改/刪除欄位皆發生在目前頁面，重用 onFormFieldChanged 的邏輯即可。
+  const onBuilderFieldsChanged = useCallback(() => {
+    onFormFieldChanged(currentPage)
+  }, [onFormFieldChanged, currentPage])
+
+  const onBuilderCreateRect = useCallback(
+    (rectPt: Rect) => {
+      setPendingField({ page: currentPage, rect: rectPt })
+    },
+    [currentPage],
+  )
+
   const toggleCrop = useCallback(() => {
     setCropMode((v) => {
       const next = !v
@@ -277,6 +305,9 @@ export default function App() {
         setTool('select') // 裁切時停用其他註解工具，避免 AnnotLayer 搶走指標事件
         setImageMode(false)
         resetImageInteraction()
+        setFormBuilderMode(false)
+        setPendingField(null)
+        setEditingField(null)
       } else {
         setCropRect(null)
       }
@@ -291,8 +322,28 @@ export default function App() {
         setTool('select') // 影像模式時停用其他註解工具，避免 AnnotLayer 搶走指標事件
         setCropMode(false)
         setCropRect(null)
+        setFormBuilderMode(false)
+        setPendingField(null)
+        setEditingField(null)
       }
       resetImageInteraction()
+      return next
+    })
+  }, [resetImageInteraction])
+
+  const toggleFormBuilder = useCallback(() => {
+    setFormBuilderMode((v) => {
+      const next = !v
+      if (next) {
+        setTool('select') // 表單建立模式時停用其他註解工具，避免 AnnotLayer 搶走指標事件
+        setCropMode(false)
+        setCropRect(null)
+        setImageMode(false)
+        resetImageInteraction()
+      } else {
+        setPendingField(null)
+        setEditingField(null)
+      }
       return next
     })
   }, [resetImageInteraction])
@@ -316,12 +367,21 @@ export default function App() {
           resetImageInteraction()
           return
         }
+        if (formBuilderMode) {
+          if (pendingField || editingField) {
+            setPendingField(null)
+            setEditingField(null)
+            return
+          }
+          setFormBuilderMode(false)
+          return
+        }
         setTool('select')
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [doc, tool, cropMode, imageMode, resetImageInteraction])
+  }, [doc, tool, cropMode, imageMode, formBuilderMode, pendingField, editingField, resetImageInteraction])
 
   if (!doc) {
     return (
@@ -372,6 +432,8 @@ export default function App() {
         toggleCrop={toggleCrop}
         imageMode={imageMode}
         toggleImageMode={toggleImageMode}
+        formBuilderMode={formBuilderMode}
+        toggleFormBuilder={toggleFormBuilder}
         showExport={showExport}
         toggleExport={() => setShowExport((v) => !v)}
         showCompress={showCompress}
@@ -430,6 +492,11 @@ export default function App() {
           insertArmed={insertArmed}
           insertNaturalPt={insertNaturalPt}
           onInsertRectChange={setInsertRect}
+          formBuilderMode={formBuilderMode}
+          builderFieldType={builderFieldType}
+          onBuilderCreateRect={onBuilderCreateRect}
+          onFormFieldsChanged={onBuilderFieldsChanged}
+          onEditFormField={setEditingField}
         />
         {cropMode && (
           <CropBar
@@ -462,6 +529,38 @@ export default function App() {
               setImageMode(false)
               resetImageInteraction()
             }}
+          />
+        )}
+        {formBuilderMode && (
+          <FormBuilderBar
+            selectedType={builderFieldType}
+            onSelectType={setBuilderFieldType}
+            onDone={() => {
+              setFormBuilderMode(false)
+              setPendingField(null)
+              setEditingField(null)
+            }}
+          />
+        )}
+        {pendingField && (
+          <FieldDialog
+            mode="create"
+            docId={doc.id}
+            page={pendingField.page}
+            fieldType={builderFieldType}
+            rectPt={pendingField.rect}
+            onClose={() => setPendingField(null)}
+            onCreated={onBuilderFieldsChanged}
+          />
+        )}
+        {editingField && (
+          <FieldDialog
+            mode="edit"
+            docId={doc.id}
+            page={editingField.page}
+            field={editingField}
+            onClose={() => setEditingField(null)}
+            onUpdated={onBuilderFieldsChanged}
           />
         )}
         {showSearch && (
