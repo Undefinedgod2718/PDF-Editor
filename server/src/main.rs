@@ -1,4 +1,5 @@
 mod api;
+mod llm;
 mod pdf;
 mod sidecar;
 mod storage;

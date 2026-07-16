@@ -23,6 +23,8 @@ interface Props {
   toggleProtect: () => void
   showEncrypt: boolean
   toggleEncrypt: () => void
+  showCompare: boolean
+  toggleCompare: () => void
 }
 
 const ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]
@@ -50,6 +52,8 @@ export default function Toolbar({
   toggleProtect,
   showEncrypt,
   toggleEncrypt,
+  showCompare,
+  toggleCompare,
 }: Props) {
   const zoomIn = () => {
     const next = ZOOM_STEPS.find((z) => z > scale + 0.001)
@@ -158,6 +162,9 @@ export default function Toolbar({
         </button>
         <button className={`tb-btn ${showEncrypt ? 'active' : ''}`} title="加密" onClick={toggleEncrypt}>
           加密
+        </button>
+        <button className={`tb-btn ${showCompare ? 'active' : ''}`} title="比較" onClick={toggleCompare}>
+          比較
         </button>
       </div>
     </div>

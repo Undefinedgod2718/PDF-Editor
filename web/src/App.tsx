@@ -28,6 +28,7 @@ import CompressDialog from './components/CompressDialog'
 import ProtectDialog from './components/ProtectDialog'
 import EncryptDialog from './components/EncryptDialog'
 import DecryptPrompt from './components/DecryptPrompt'
+import CompareDialog from './components/CompareDialog'
 
 interface FlashTarget {
   page: number
@@ -87,6 +88,9 @@ export default function App() {
   // 顯示「輸入密碼解密下載」提示，取代原本的死錯誤訊息。
   const [lockedDoc, setLockedDoc] = useState<{ id: string; filename?: string } | null>(null)
 
+  // ---- 比較對話框相關狀態（Phase 13）----
+  const [showCompare, setShowCompare] = useState(false)
+
   const resetImageInteraction = useCallback(() => {
     setSelectedImage(null)
     setInsertArmed(false)
@@ -124,6 +128,7 @@ export default function App() {
     setShowCompress(false)
     setShowProtect(false)
     setShowEncrypt(false)
+    setShowCompare(false)
   }, [])
 
   // fetchDocInfo／render 對開檔密碼加密的 PDF 一律 500（PDFium 打不開）。GET /protection
@@ -375,6 +380,8 @@ export default function App() {
         toggleProtect={() => setShowProtect((v) => !v)}
         showEncrypt={showEncrypt}
         toggleEncrypt={() => setShowEncrypt((v) => !v)}
+        showCompare={showCompare}
+        toggleCompare={() => setShowCompare((v) => !v)}
       />
       <AnnotToolbar
         tool={tool}
@@ -530,6 +537,16 @@ export default function App() {
           />
         )}
         {showEncrypt && <EncryptDialog doc={doc} onClose={() => setShowEncrypt(false)} />}
+        {showCompare && (
+          <CompareDialog
+            doc={doc}
+            onClose={() => setShowCompare(false)}
+            onOpenDoc={async (id) => {
+              setShowCompare(false)
+              await openDocById(id)
+            }}
+          />
+        )}
         {lockedDoc && (
           <DecryptPrompt
             id={lockedDoc.id}

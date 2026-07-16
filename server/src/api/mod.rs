@@ -7,9 +7,12 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::pdf::{annots, compress, exportops, formops, imageops, objects, ops, pageops, protect};
+use crate::pdf::{
+    annots, compare, compress, exportops, formops, imageops, objects, ops, pageops, protect,
+};
 use crate::sidecar;
 use crate::SharedState;
+use crate::llm;
 
 pub fn router() -> Router<SharedState> {
     Router::new()
@@ -51,6 +54,7 @@ pub fn router() -> Router<SharedState> {
         )
         .route("/api/documents/{id}/pages/reorder", post(reorder_pages))
         .route("/api/documents/merge", post(merge_documents))
+        .route("/api/documents/compare", post(compare_documents))
         .route("/api/documents/{id}/extract", post(extract_pages))
         .route(
             "/api/documents/{id}/pages/{page}/objects",
@@ -777,6 +781,58 @@ async fn merge_documents(
     let filename = body.filename.unwrap_or_else(|| "merged.pdf".into());
     let meta = state.storage.save(filename, &bytes, None)?;
     Ok(Json(serde_json::to_value(&meta.for_client()).unwrap()))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CompareBody {
+    old_id: Uuid,
+    new_id: Uuid,
+    filename: Option<String>,
+    #[serde(default = "default_true")]
+    visual_diff: bool,
+    #[serde(default = "default_true")]
+    llm_summary: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+async fn compare_documents(
+    State(state): State<SharedState>,
+    Json(body): Json<CompareBody>,
+) -> Result<impl IntoResponse, ApiError> {
+    let old_meta = state.storage.get(body.old_id).ok_or_else(not_found)?;
+    let new_meta = state.storage.get(body.new_id).ok_or_else(not_found)?;
+    let old_path = state.storage.pdf_path(body.old_id);
+    let new_path = state.storage.pdf_path(body.new_id);
+    let opts = compare::CompareOptions {
+        visual_diff: body.visual_diff,
+    };
+
+    let (mut report, bytes) = state
+        .engine
+        .run(move |pdfium, _cache| compare::compare(pdfium, &old_path, &new_path, &opts))
+        .await?;
+
+    let filename = body
+        .filename
+        .unwrap_or_else(|| format!("compare_{}_vs_{}", old_meta.filename, new_meta.filename));
+    let out_meta = state.storage.save(filename, &bytes, None)?;
+    // pdfium can't write /NM; stamp stable ids in a lopdf pass, same as
+    // create_annotation — the annotations burned in by compare::compare
+    // still need it for the per-page annotation UI to address them later.
+    annots::ensure_annotation_names(&state.storage.pdf_path(out_meta.id))?;
+
+    if body.llm_summary {
+        report.summary = llm::summarize_diff(&report).await;
+    }
+
+    Ok(Json(serde_json::json!({
+        "document": out_meta.for_client(),
+        "report": report,
+    })))
 }
 
 #[derive(Deserialize)]

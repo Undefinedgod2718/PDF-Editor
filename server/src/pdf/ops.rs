@@ -1,6 +1,6 @@
 use std::io::Cursor;
 
-use image::ImageFormat;
+use image::{ImageFormat, RgbaImage};
 use pdfium_render::prelude::*;
 use serde::Serialize;
 
@@ -84,8 +84,10 @@ pub fn doc_info(doc: &PdfDocument) -> anyhow::Result<DocInfo> {
     })
 }
 
-/// Render one page to PNG. `scale` is pixels per PDF point (1.0 = 72 dpi).
-pub fn render_page(doc: &PdfDocument, index: u16, scale: f32) -> anyhow::Result<Vec<u8>> {
+/// Render one page to a raw RGBA bitmap. `scale` is pixels per PDF point
+/// (1.0 = 72 dpi). Shared by the PNG render endpoint and the pixel-diff
+/// pass in `compare.rs`, which needs the buffer without a PNG round-trip.
+pub fn render_page_image(doc: &PdfDocument, index: u16, scale: f32) -> anyhow::Result<RgbaImage> {
     let page = doc.pages().get(index)?;
     let width = (page.width().value * scale).round() as i32;
     let config = PdfRenderConfig::new()
@@ -93,7 +95,12 @@ pub fn render_page(doc: &PdfDocument, index: u16, scale: f32) -> anyhow::Result<
         .render_form_data(true)
         .render_annotations(true);
     let bitmap = page.render_with_config(&config)?;
-    let image = bitmap.as_image();
+    Ok(bitmap.as_image().to_rgba8())
+}
+
+/// Render one page to PNG. `scale` is pixels per PDF point (1.0 = 72 dpi).
+pub fn render_page(doc: &PdfDocument, index: u16, scale: f32) -> anyhow::Result<Vec<u8>> {
+    let image = render_page_image(doc, index, scale)?;
     let mut buf = Cursor::new(Vec::new());
     image.write_to(&mut buf, ImageFormat::Png)?;
     Ok(buf.into_inner())
@@ -164,11 +171,12 @@ pub fn search(doc: &PdfDocument, query: &str) -> anyhow::Result<Vec<SearchHit>> 
     Ok(hits)
 }
 
-/// Merge adjacent character rects on the same line into wider rects.
-fn merge_char_rects(chars: &[(char, PdfRect)], page_height: f32) -> Vec<Rect> {
+/// Merge adjacent rects (already top-left, points) that sit on the same
+/// line into wider rects. Used for per-character search hits and, via
+/// `compare.rs`, for diff highlight spans built from `CharBox` slices.
+pub(crate) fn merge_rects(rects: impl IntoIterator<Item = Rect>) -> Vec<Rect> {
     let mut out: Vec<Rect> = Vec::new();
-    for (_, b) in chars {
-        let r = to_top_left(b, page_height);
+    for r in rects {
         if r.w <= 0.0 || r.h <= 0.0 {
             continue;
         }
@@ -187,4 +195,9 @@ fn merge_char_rects(chars: &[(char, PdfRect)], page_height: f32) -> Vec<Rect> {
         out.push(r);
     }
     out
+}
+
+/// Merge adjacent character rects on the same line into wider rects.
+fn merge_char_rects(chars: &[(char, PdfRect)], page_height: f32) -> Vec<Rect> {
+    merge_rects(chars.iter().map(|(_, b)| to_top_left(b, page_height)))
 }
