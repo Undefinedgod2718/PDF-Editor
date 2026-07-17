@@ -55,7 +55,7 @@ tar -C "$ROOT" \
   --exclude='web/dist' \
   --exclude='.git' \
   --exclude='deploy/stage' \
-  -czf "$STAGE/pack/src.tgz" server
+  -czf "$STAGE/pack/src.tgz" Cargo.toml Cargo.lock pdf-core server
 
 tar -C "$ROOT/web" -czf "$STAGE/pack/webdist.tgz" dist
 tar -C "$ROOT/server/fonts" -czf "$STAGE/pack/fonts.tgz" .

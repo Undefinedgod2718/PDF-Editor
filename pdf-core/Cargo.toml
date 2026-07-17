@@ -1,0 +1,24 @@
+[package]
+name = "pdf-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pdfium-render.workspace = true
+image.workspace = true
+lopdf.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+zip.workspace = true
+tokio = { version = "1", features = ["sync", "process", "fs", "time"] }
+dashmap = "6"
+ttf-parser = "0.25.1"
+subsetter = "0.2.6"
+lru = "0.12"
+flate2 = "1"
+tiff = "0.9"
+argon2 = { version = "0.5", features = ["std"] }
+similar = "2"

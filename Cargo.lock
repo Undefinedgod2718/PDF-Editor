@@ -1838,30 +1838,46 @@ dependencies = [
 ]
 
 [[package]]
-name = "pdf-editor-server"
+name = "pdf-core"
 version = "0.3.0"
 dependencies = [
  "anyhow",
  "argon2",
- "axum",
  "dashmap",
  "flate2",
  "image",
  "lopdf",
  "lru",
  "pdfium-render",
- "reqwest",
  "serde",
  "serde_json",
  "similar",
  "subsetter",
  "tiff 0.9.1",
  "tokio",
+ "tracing",
+ "ttf-parser",
+ "uuid",
+ "zip",
+]
+
+[[package]]
+name = "pdf-editor-server"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "image",
+ "lopdf",
+ "pdf-core",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
  "tokio-util",
  "tower-http",
  "tracing",
  "tracing-subscriber",
- "ttf-parser",
  "urlencoding",
  "uuid",
  "zip",
