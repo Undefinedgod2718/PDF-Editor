@@ -1,9 +1,3 @@
-mod api;
-mod llm;
-mod pdf;
-mod sidecar;
-mod storage;
-
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -11,16 +5,11 @@ use axum::extract::DefaultBodyLimit;
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
+use pdf_editor_server::{api, pdf, sidecar, storage, AppState, SharedState};
+
 /// PDF / stamp / image uploads — Axum's default 2 MiB limit rejects typical PDFs
 /// with `Error parsing multipart/form-data request`.
 const MAX_UPLOAD_BYTES: usize = 200 * 1024 * 1024;
-
-pub struct AppState {
-    pub storage: storage::Storage,
-    pub engine: pdf::engine::PdfEngine,
-}
-
-pub type SharedState = Arc<AppState>;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

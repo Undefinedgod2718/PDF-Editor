@@ -65,10 +65,34 @@ impl PdfEngine {
         std::thread::Builder::new()
             .name("pdfium-worker".into())
             .spawn(move || {
-                let bindings = Pdfium::bind_to_library(
-                    Pdfium::pdfium_platform_library_name_at_path("./"),
-                )
-                .or_else(|_| Pdfium::bind_to_system_library());
+                // 順序：PDF_EDITOR_PDFIUM 指定目錄 → 執行檔所在目錄
+                // （桌面版 bundle、deploy BIN）→ cwd（server 既有慣例）
+                // → 系統庫。
+                let mut candidates: Vec<String> = Vec::new();
+                if let Ok(dir) = std::env::var("PDF_EDITOR_PDFIUM") {
+                    candidates.push(dir);
+                }
+                if let Some(exe_dir) = std::env::current_exe()
+                    .ok()
+                    .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+                {
+                    candidates.push(exe_dir.to_string_lossy().into_owned());
+                }
+                candidates.push("./".into());
+
+                let mut bindings = None;
+                for dir in &candidates {
+                    if let Ok(b) = Pdfium::bind_to_library(
+                        Pdfium::pdfium_platform_library_name_at_path(dir),
+                    ) {
+                        bindings = Some(b);
+                        break;
+                    }
+                }
+                let bindings = match bindings {
+                    Some(b) => Ok(b),
+                    None => Pdfium::bind_to_system_library(),
+                };
 
                 let pdfium = match bindings {
                     Ok(b) => {

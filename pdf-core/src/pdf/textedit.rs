@@ -222,9 +222,10 @@ pub fn edit_line(
 /// Insert a new line of text below line `after`, copying its style (font
 /// size, fill color, left edge). Leading comes from the gap to the next
 /// line when there is one, else 1.35× the font size. With `shift_down`,
-/// every object fully below the reference line first moves down by the
-/// leading so the new line lands in cleared space (no reflow — objects that
-/// fall off the page bottom are simply clipped by the page).
+/// later text lines (reading order) and non-text objects below the
+/// reference line first move down by the leading so the new line lands in
+/// cleared space (no reflow — objects that fall off the page bottom are
+/// simply clipped by the page).
 pub fn insert_line(
     pdfium: &Pdfium,
     path: &Path,
@@ -268,11 +269,23 @@ pub fn insert_line(
         let ref_bottom = line.bottom();
 
         if req.shift_down {
-            // Move everything strictly below the reference line down. Bounds
-            // must be collected before mutating: translate invalidates the
-            // iteration order guarantees.
+            // Text: use reading order (same rule as shift_line and_below) —
+            // adjacent lines often share a baseline edge and fail a strict
+            // geometric `top < ref_bottom` check. Non-text: keep geometry.
             let mut below: Vec<usize> = Vec::new();
+            let mut text_objects = std::collections::HashSet::new();
+            for grouped in &lines {
+                for run in &grouped.runs {
+                    text_objects.insert(run.object_index);
+                }
+            }
+            for other in &lines[req.after + 1..] {
+                below.extend(other.runs.iter().map(|r| r.object_index));
+            }
             for (i, object) in page.objects().iter().enumerate() {
+                if text_objects.contains(&i) {
+                    continue;
+                }
                 let Ok(bounds) = object.bounds() else { continue };
                 if bounds.top().value < ref_bottom {
                     below.push(i);
