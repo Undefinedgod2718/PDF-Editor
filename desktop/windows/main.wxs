@@ -205,8 +205,17 @@
                 </RegistryKey>
                 {{/each~}}
             </Component>
+            <!--
+              Path is per-machine (ProgramFiles KeyPath). File associations must
+              live in a separate HKCU component — mixing them triggers ICE57.
+            -->
             <Component Id="Path" Guid="{{path_component_guid}}" Win64="$(var.Win64)">
                 <File Id="Path" Source="{{main_binary_path}}" KeyPath="yes" Checksum="yes"/>
+            </Component>
+            {{#if file_associations}}
+            <Component Id="FileAssociations" Guid="*" Win64="$(var.Win64)">
+                <!-- Single HKCU KeyPath so ICE57 stays clean (no per-machine File). -->
+                <RegistryValue Root="HKCU" Key="Software\\{{manufacturer}}\\{{product_name}}" Name="FileAssociations" Type="integer" Value="1" KeyPath="yes" />
                 {{#each file_associations as |association| ~}}
                 {{#each association.ext as |ext| ~}}
                 <!-- Register as an available opener without replacing the current default. -->
@@ -225,6 +234,7 @@
                 {{/each~}}
                 {{/each~}}
             </Component>
+            {{/if}}
             {{#each binaries as |bin| ~}}
             <Component Id="{{ bin.id }}" Guid="{{bin.guid}}" Win64="$(var.Win64)">
                 <File Id="Bin_{{ bin.id }}" Source="{{bin.path}}" KeyPath="yes"/>
@@ -307,6 +317,10 @@
                 <ComponentRef Id="UpdateTask" />
                 <ComponentRef Id="UpdateTaskInstaller" />
                 <ComponentRef Id="UpdateTaskUninstaller" />
+            {{/if}}
+
+            {{#if file_associations}}
+            <ComponentRef Id="FileAssociations"/>
             {{/if}}
 
             <Feature Id="ShortcutsFeature"
