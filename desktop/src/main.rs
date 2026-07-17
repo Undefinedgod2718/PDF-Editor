@@ -1,15 +1,16 @@
 //! 單人服務桌面殼（ADR-002/003 Phase 1）。
 //!
 //! 內嵌 `server` lib 的 axum router，bind `127.0.0.1:0`（隨機埠），
-//! 每次啟動產生一次性 token；WebView 以 initialization script 種
-//! cookie，`/api/*` 之外（靜態前端檔）不驗 token，`/api/*` 缺 token
-//! 一律 401 — 防同機其他程序打 loopback API。終態（Phase 2）遷
-//! Tauri IPC 後關閉整個 port。
+//! 每次啟動產生一次性 token；WebView initialization script 攔截
+//! `fetch`，自動加 `Authorization: Bearer <token>`（token 不進
+//! `document.cookie`，降低 XSS 外洩面）。`/api/*` 缺 token 一律 401。
+//! 終態（Phase 2）遷 Tauri IPC 後關閉整個 port。
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use axum::extract::{DefaultBodyLimit, Request};
 use axum::http::{header, StatusCode};
@@ -23,24 +24,28 @@ mod local_api;
 
 const MAX_UPLOAD_BYTES: usize = 200 * 1024 * 1024;
 const TOKEN_COOKIE: &str = "pdfed_token";
+const API_READY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// 一次性 session token：兩個 v4 UUID 串接（2×122 bit CSPRNG）。
-/// 只存在記憶體與 WebView cookie，不落磁碟、不進 log。
-/// `PDF_EDITOR_TOKEN` 可覆蓋 — 僅供煙霧測試/CI 對 API 打已知 token，
-/// 正常桌面啟動不得設定。
-fn generate_token() -> String {
+/// 只存在記憶體與 WebView init-script 閉包，不落磁碟、不進 log。
+/// `PDF_EDITOR_TOKEN` 可覆蓋 — 僅供煙霧測試/CI；必須為非空 hex，
+/// 避免寫入 JS 字面值時注入。正常桌面啟動不得設定。
+fn generate_token() -> anyhow::Result<String> {
     if let Ok(t) = std::env::var("PDF_EDITOR_TOKEN") {
+        if t.is_empty() || !t.chars().all(|c| c.is_ascii_hexdigit()) {
+            anyhow::bail!("PDF_EDITOR_TOKEN must be non-empty hexadecimal");
+        }
         tracing::warn!("PDF_EDITOR_TOKEN override in effect — test/CI use only");
-        return t;
+        return Ok(t);
     }
-    format!(
+    Ok(format!(
         "{}{}",
         uuid::Uuid::new_v4().simple(),
         uuid::Uuid::new_v4().simple()
-    )
+    ))
 }
 
-/// `/api/*` 需帶 token（cookie 或 Bearer header）；靜態前端檔放行。
+/// `/api/*` 需帶 token（Bearer 優先；cookie 僅相容舊 CI）；靜態前端檔放行。
 async fn require_token(
     token: Arc<String>,
     req: Request,
@@ -89,6 +94,41 @@ fn data_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(base).join("pdf-editor")
 }
 
+/// Init script：用 JSON 字面值帶入 token，攔截 fetch 自動加 Bearer。
+/// 不寫 `document.cookie`，避免 XSS 直接讀出 token 字串。
+fn auth_init_script(token: &str) -> String {
+    let token_js = serde_json::to_string(token).expect("token is plain hex");
+    format!(
+        r#"(function () {{
+  var token = {token_js};
+  var bearer = "Bearer " + token;
+  var orig = window.fetch.bind(window);
+  window.fetch = function (input, init) {{
+    init = init || {{}};
+    var headers = new Headers(init.headers || {{}});
+    if (!headers.has("Authorization")) {{
+      headers.set("Authorization", bearer);
+    }}
+    init.headers = headers;
+    return orig(input, init);
+  }};
+}})();"#
+    )
+}
+
+/// 等內嵌 axum 真正開始 accept，避免 WebView 首屏連線失敗。
+fn wait_until_accepting(port: u16, timeout: Duration) -> anyhow::Result<()> {
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let start = Instant::now();
+    while start.elapsed() < timeout {
+        if std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(100)).is_ok() {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    anyhow::bail!("embedded API on 127.0.0.1:{port} did not become ready in {timeout:?}")
+}
+
 fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(std::env::var("RUST_LOG").unwrap_or_else(|_| "info".into()))
@@ -104,7 +144,7 @@ fn main() -> anyhow::Result<()> {
         Err(e) => tracing::warn!("office sidecar unavailable — docx/xlsx export disabled: {e}"),
     }
 
-    let token = Arc::new(generate_token());
+    let token = Arc::new(generate_token()?);
 
     let web_dist = std::env::var("PDF_EDITOR_WEB").unwrap_or_else(|_| "../web/dist".into());
     let index = format!("{web_dist}/index.html");
@@ -128,6 +168,9 @@ fn main() -> anyhow::Result<()> {
     let port = listener.local_addr()?.port();
     tracing::info!("embedded API listening on 127.0.0.1:{port}");
 
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+    let shutdown_tx = Arc::new(Mutex::new(Some(shutdown_tx)));
+
     std::thread::Builder::new()
         .name("embedded-axum".into())
         .spawn(move || {
@@ -138,13 +181,21 @@ fn main() -> anyhow::Result<()> {
                 .block_on(async move {
                     let listener = tokio::net::TcpListener::from_std(listener)
                         .expect("tokio listener from std");
-                    axum::serve(listener, app).await.expect("axum serve");
+                    let shutdown = async {
+                        let _ = shutdown_rx.await;
+                    };
+                    if let Err(e) = axum::serve(listener, app)
+                        .with_graceful_shutdown(shutdown)
+                        .await
+                    {
+                        tracing::error!("axum serve ended with error: {e}");
+                    }
                 });
         })?;
 
-    // token 先種 cookie 再載頁：init script 在每次 navigation 的
-    // document start 執行，頁面 JS 的所有 same-origin fetch 自動帶上。
-    let init_script = format!("document.cookie = \"{TOKEN_COOKIE}={token}; path=/\";");
+    wait_until_accepting(port, API_READY_TIMEOUT)?;
+
+    let init_script = auth_init_script(token.as_str());
     let url: tauri::Url = format!("http://127.0.0.1:{port}/").parse()?;
 
     tauri::Builder::default()
@@ -162,7 +213,19 @@ fn main() -> anyhow::Result<()> {
             .build()?;
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("tauri run");
+        .build(tauri::generate_context!())
+        .expect("tauri build")
+        .run(move |_app, event| {
+            if matches!(
+                event,
+                tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
+            ) {
+                if let Ok(mut guard) = shutdown_tx.lock() {
+                    if let Some(tx) = guard.take() {
+                        let _ = tx.send(());
+                    }
+                }
+            }
+        });
     Ok(())
 }

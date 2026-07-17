@@ -30,8 +30,9 @@ workspace
 
 拆分原則：
 
-- `pdf-core` 只依賴 PDF/字型/影像 crate，禁止 HTTP、認證（argon2）、檔案上傳語意
-- `server` 保留：axum、multipart、argon2、LLM proxy（reqwest）
+- `pdf-core` 只依賴 PDF/字型/影像 crate，禁止 HTTP、檔案上傳語意
+- `argon2` **允許**留在 `pdf-core`：僅供 PDF owner-password 雜湊（`protect`），不是 HTTP 登入認證
+- `server` 保留：axum、multipart、LLM proxy（reqwest）
 - 拆分屬純重構：`cargo test` 全綠 + 多人版煙霧測試不變，才算完成
 
 ## Consequences
@@ -63,5 +64,5 @@ workspace
 
 ## TODO（實作時補）
 
-- [ ] 拆分後 crate 版本策略（workspace version 統一 vs 各自）
+- [x] 拆分後 crate 版本策略：workspace `version` 統一（見根 `Cargo.toml`）
 - [ ] `AppState` 拆分：`Storage`+`PdfEngine` 歸 pdf-core 組合型，router 組態歸 server

@@ -7,7 +7,7 @@
 ## 0. 大原則
 
 - **一套 React codebase**（`web/`），不開新專案、不引入 Tauri JS API/npm 套件
-- 桌面能力全部走既有 same-origin HTTP（`/api/local/*`），**認證零處理**（token cookie 由桌面殼注入，fetch 自動帶上）
+- 桌面能力全部走既有 same-origin HTTP（`/api/local/*`），**認證零處理**（桌面殼 initialization script 攔截 `fetch`，自動加 `Authorization: Bearer <token>`；前端勿自管 token）
 - `mode=web` 行為**一個位元組都不能變** — 多人版在第三方 review 收尾，不能受影響
 
 ## 1. Mode 偵測
@@ -31,7 +31,7 @@
 | 關閉攔截 | dirty 時 `beforeunload` 攔截（WebView 支援度有限，盡力而為；原生視窗關閉攔截屬 Rust 端 Phase 2，不歸本次） |
 | 下載按鈕 | local 模式改文案為「另存新檔」直接觸發 save-as-dialog（或隱藏，擇一，PR 說明理由） |
 
-## 3. API 契約（全部同 origin、cookie 自動帶）
+## 3. API 契約（全部同 origin、Bearer 由殼自動帶）
 
 ### `GET /api/local/ping`
 `200 {"mode":"local"}`
@@ -80,6 +80,6 @@
 
 ## 6. 後端現狀（參考，勿改）
 
-- 分支 `refactor/adr-001-workspace`；desktop crate = Tauri v2 殼 + 內嵌 axum（隨機埠 + token cookie）
+- 分支 `refactor/adr-001-workspace`；desktop crate = Tauri v2 殼 + 內嵌 axum（隨機埠 + Bearer fetch patch）
 - 後端煙霧已驗：open → rotate → save 原子寫回 → PDFium 重載 → 渲染正確；409/force/save-as 全通過
 - 你的開發環境：web 模式照舊 `npm run dev`（proxy 8050）開發即可，local 分流邏輯用 §3 契約 mock
