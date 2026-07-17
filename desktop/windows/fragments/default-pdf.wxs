@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <!--
+    When SETDEFAULTPDF=1 (DefaultPdfDlg checkbox), set HKCU .pdf default ProgId.
+    main.wxs registers ProgId "{{bundle_id}}.pdf" in OpenWithProgids.
+    Windows 10/11 may still prompt in Settings > Default apps — OS limitation.
+  -->
+  <Fragment>
+    <DirectoryRef Id="TARGETDIR">
+      <Component Id="DefaultPdfAssociation" Guid="*">
+        <!-- UILevel=5 prevents unattended installs from silently taking over .pdf. -->
+        <Condition>SETDEFAULTPDF="1" AND UILevel=5</Condition>
+        <RegistryKey Root="HKCU" Key="Software\Classes\.pdf">
+          <RegistryValue Type="string" Value="{{bundle_id}}.pdf" KeyPath="yes" />
+        </RegistryKey>
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+</Wix>

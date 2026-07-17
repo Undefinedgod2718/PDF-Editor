@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<WixLocalization Culture="zh-TW" Codepage="950" xmlns="http://schemas.microsoft.com/wix/2006/localization">
+  <String Id="DefaultPdfDlg_Title">PDF 檔案關聯</String>
+  <String Id="DefaultPdfDlg_Description">選擇是否將 PDF Editor 設為開啟 PDF 的預設程式。</String>
+  <String Id="DefaultPdfCheckboxLabel">將 PDF Editor 設為預設 PDF 開啟程式</String>
+  <String Id="DefaultPdfDlg_Note">即使設為預設，Windows 仍可能要求您在「設定 &gt; 預設應用程式」中確認一次。</String>
+  <String Id="DefaultPdfDlg_BannerBitmap">WixUI_Bmp_Banner</String>
+</WixLocalization>

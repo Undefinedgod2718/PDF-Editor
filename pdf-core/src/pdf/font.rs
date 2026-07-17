@@ -4,6 +4,7 @@
 //! is rebuilt here and spliced back into the subset font.
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use subsetter::GlyphRemapper;
@@ -12,17 +13,34 @@ use subsetter::GlyphRemapper;
 pub fn full_font_bytes() -> Option<&'static [u8]> {
     static FONT: OnceLock<Option<Vec<u8>>> = OnceLock::new();
     FONT.get_or_init(|| {
-        let path = std::env::var("PDF_EDITOR_FONT")
-            .unwrap_or_else(|_| "fonts/GenSenRoundedTW-R.ttf".into());
-        match std::fs::read(&path) {
-            Ok(bytes) => Some(bytes),
-            Err(e) => {
-                tracing::warn!(
-                    "CJK font not loaded ({path}): {e}; freeText falls back to Helvetica"
-                );
-                None
+        let mut candidates = Vec::new();
+        if let Ok(path) = std::env::var("PDF_EDITOR_FONT") {
+            candidates.push(PathBuf::from(path));
+        } else {
+            if let Some(exe_dir) = std::env::current_exe()
+                .ok()
+                .and_then(|path| path.parent().map(PathBuf::from))
+            {
+                candidates.push(exe_dir.join("fonts/GenSenRoundedTW-R.ttf"));
+            }
+            candidates.push(PathBuf::from("fonts/GenSenRoundedTW-R.ttf"));
+        }
+
+        for path in &candidates {
+            if let Ok(bytes) = std::fs::read(path) {
+                return Some(bytes);
             }
         }
+
+        tracing::warn!(
+            "CJK font not loaded (tried {}); freeText falls back to Helvetica",
+            candidates
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        None
     })
     .as_deref()
 }
@@ -31,8 +49,8 @@ pub fn full_font_bytes() -> Option<&'static [u8]> {
 /// standalone TTF with a rebuilt unicode cmap. Characters outside the BMP
 /// or missing from the font are silently dropped (they render as nothing).
 pub fn subset_for_text(full: &[u8], text: &str) -> anyhow::Result<Vec<u8>> {
-    let face = ttf_parser::Face::parse(full, 0)
-        .map_err(|e| anyhow::anyhow!("font parse failed: {e}"))?;
+    let face =
+        ttf_parser::Face::parse(full, 0).map_err(|e| anyhow::anyhow!("font parse failed: {e}"))?;
 
     let mut remapper = GlyphRemapper::new();
     let mut char_to_new_gid: BTreeMap<u16, u16> = BTreeMap::new();
@@ -84,7 +102,7 @@ fn build_cmap(mapping: &BTreeMap<u16, u16>) -> Vec<u8> {
     }
     push16(&mut sub, 0xFFFF);
     push16(&mut sub, 0); // reservedPad
-    // startCode[]
+                         // startCode[]
     for &c in mapping.keys() {
         push16(&mut sub, c);
     }
@@ -94,7 +112,7 @@ fn build_cmap(mapping: &BTreeMap<u16, u16>) -> Vec<u8> {
         push16(&mut sub, gid.wrapping_sub(c));
     }
     push16(&mut sub, 1); // 0xFFFF + 1 = 0 (.notdef)
-    // idRangeOffset[]
+                         // idRangeOffset[]
     for _ in 0..seg_count {
         push16(&mut sub, 0);
     }

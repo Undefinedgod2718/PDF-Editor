@@ -9,6 +9,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -94,6 +95,48 @@ fn data_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(base).join("pdf-editor")
 }
 
+/// 前端靜態檔：`PDF_EDITOR_WEB` 覆蓋；打包後預設 `<exe>/web/dist`。
+fn resolve_web_dist() -> anyhow::Result<PathBuf> {
+    if let Ok(dir) = std::env::var("PDF_EDITOR_WEB") {
+        let dir = PathBuf::from(dir);
+        if dir.join("index.html").is_file() {
+            return Ok(dir);
+        }
+        anyhow::bail!("PDF_EDITOR_WEB has no index.html: {}", dir.display());
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            let bundled = exe_dir.join("web/dist");
+            if bundled.join("index.html").is_file() {
+                return Ok(bundled);
+            }
+        }
+    }
+    let development = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../web/dist");
+    if development.join("index.html").is_file() {
+        return Ok(development);
+    }
+    anyhow::bail!("web frontend not found beside executable or in development tree")
+}
+
+/// 檔案關聯／CLI：`pdf-editor-desktop.exe path\to\file.pdf`
+fn startup_pdf_from_argv() -> Option<PathBuf> {
+    for arg in std::env::args_os().skip(1) {
+        if arg.to_str().is_some_and(|value| value.starts_with('-')) {
+            continue;
+        }
+        let path = PathBuf::from(arg);
+        if path
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case("pdf"))
+        {
+            return Some(path);
+        }
+    }
+    None
+}
+
 /// Init script：用 JSON 字面值帶入 token，攔截 fetch 自動加 Bearer。
 /// 不寫 `document.cookie`，避免 XSS 直接讀出 token 字串。
 fn auth_init_script(token: &str) -> String {
@@ -136,6 +179,21 @@ fn main() -> anyhow::Result<()> {
 
     let storage = storage::Storage::new(data_dir())?;
     let engine = pdf::engine::PdfEngine::spawn()?;
+
+    let (startup_doc, startup_error) = match startup_pdf_from_argv() {
+        Some(path) => match storage.open_path(&path) {
+            Ok(meta) => {
+                tracing::info!("opened argv PDF: {}", path.display());
+                (Some(meta), None)
+            }
+            Err(e) => {
+                let message = format!("無法開啟 {}：{e}", path.display());
+                tracing::warn!("{message}");
+                (None, Some(message))
+            }
+        },
+        None => (None, None),
+    };
     let state: SharedState = Arc::new(AppState { storage, engine });
 
     match sidecar::health() {
@@ -146,9 +204,9 @@ fn main() -> anyhow::Result<()> {
 
     let token = Arc::new(generate_token()?);
 
-    let web_dist = std::env::var("PDF_EDITOR_WEB").unwrap_or_else(|_| "../web/dist".into());
-    let index = format!("{web_dist}/index.html");
-    let static_files = ServeDir::new(&web_dist).fallback(ServeFile::new(&index));
+    let web_dist = resolve_web_dist()?;
+    let index = web_dist.join("index.html");
+    let static_files = ServeDir::new(&web_dist).fallback(ServeFile::new(index));
 
     let guard_token = token.clone();
     let app = api::router()
@@ -195,22 +253,37 @@ fn main() -> anyhow::Result<()> {
 
     wait_until_accepting(port, API_READY_TIMEOUT)?;
 
-    let init_script = auth_init_script(token.as_str());
+    let mut init_script = auth_init_script(token.as_str());
+    if let Some(meta) = startup_doc {
+        let id_js = serde_json::to_string(&meta.id.to_string()).expect("uuid");
+        init_script.push_str(&format!(
+            r#"
+(function () {{
+  var id = {id_js};
+  window.__PDF_EDITOR_STARTUP_DOC__ = id;
+}})();"#
+        ));
+    }
+    if let Some(message) = startup_error {
+        let message_js = serde_json::to_string(&message).expect("error is valid string");
+        init_script.push_str(&format!(
+            r#"
+(function () {{
+  window.__PDF_EDITOR_STARTUP_ERROR__ = {message_js};
+}})();"#
+        ));
+    }
     let url: tauri::Url = format!("http://127.0.0.1:{port}/").parse()?;
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
             let _ = local_api::APP_HANDLE.set(app.handle().clone());
-            tauri::WebviewWindowBuilder::new(
-                app,
-                "main",
-                tauri::WebviewUrl::External(url.clone()),
-            )
-            .title("PDF Editor")
-            .inner_size(1440.0, 900.0)
-            .initialization_script(&init_script)
-            .build()?;
+            tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::External(url.clone()))
+                .title("PDF Editor")
+                .inner_size(1440.0, 900.0)
+                .initialization_script(&init_script)
+                .build()?;
             Ok(())
         })
         .build(tauri::generate_context!())
