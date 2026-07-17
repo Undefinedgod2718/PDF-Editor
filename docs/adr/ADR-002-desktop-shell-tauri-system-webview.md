@@ -1,6 +1,6 @@
 # ADR-002: 桌面殼 = Tauri v2 + 系統 WebView；前端單一 React codebase
 
-- **狀態**: Proposed（草案 2026-07-17）
+- **狀態**: Accepted（2026-07-17 使用者核准動工）
 - **決策者**: richard + 維運團隊
 - **前置**: ADR-001
 - **被引用**: ADR-003, ADR-005

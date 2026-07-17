@@ -19,6 +19,8 @@ use tower_http::services::{ServeDir, ServeFile};
 
 use pdf_editor_server::{api, pdf, sidecar, storage, AppState, SharedState};
 
+mod local_api;
+
 const MAX_UPLOAD_BYTES: usize = 200 * 1024 * 1024;
 const TOKEN_COOKIE: &str = "pdfed_token";
 
@@ -110,6 +112,7 @@ fn main() -> anyhow::Result<()> {
 
     let guard_token = token.clone();
     let app = api::router()
+        .merge(local_api::router())
         .with_state(state)
         .fallback_service(static_files)
         .layer(DefaultBodyLimit::max(MAX_UPLOAD_BYTES))
@@ -145,7 +148,9 @@ fn main() -> anyhow::Result<()> {
     let url: tauri::Url = format!("http://127.0.0.1:{port}/").parse()?;
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
+            let _ = local_api::APP_HANDLE.set(app.handle().clone());
             tauri::WebviewWindowBuilder::new(
                 app,
                 "main",

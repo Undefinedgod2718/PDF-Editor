@@ -1,6 +1,6 @@
 # ADR-003: 本機傳輸層 — Phase 1 內嵌 axum + loopback token，終態 Tauri IPC
 
-- **狀態**: Proposed（草案 2026-07-17）
+- **狀態**: Accepted（2026-07-17 使用者核准動工）
 - **決策者**: richard + 維運團隊
 - **前置**: ADR-001, ADR-002
 - **被引用**: ADR-004
