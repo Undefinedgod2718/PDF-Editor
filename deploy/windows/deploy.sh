@@ -7,7 +7,7 @@
 #   HOST        ssh 目標（user@host）
 #   REMOTE_DIR  遠端安裝目錄（Windows 路徑，反斜線）
 #   SERVICE     NSSM 服務名稱
-#   PORT        對外埠（防火牆規則）
+#   PORT        對外埠（防火牆規則 + PDF_EDITOR_PORT）
 set -e
 
 HOST="${HOST:-user@192.168.17.56}"
@@ -39,7 +39,7 @@ echo "== 傳檔 =="
 scp -r "$STAGE"/* "$HOST:$REMOTE_DIR_FWD/"
 
 echo "== 設定服務 + 防火牆 =="
-ssh "$HOST" "$REMOTE_DIR\\nssm.exe install $SERVICE $REMOTE_DIR\\pdf-editor-server.exe 2>nul & $REMOTE_DIR\\nssm.exe set $SERVICE AppDirectory $REMOTE_DIR & $REMOTE_DIR\\nssm.exe set $SERVICE AppEnvironmentExtra PDF_EDITOR_WEB=$REMOTE_DIR\\web\\dist PDF_EDITOR_DATA=$REMOTE_DIR\\data & $REMOTE_DIR\\nssm.exe set $SERVICE Start SERVICE_AUTO_START & $REMOTE_DIR\\nssm.exe set $SERVICE AppStdout $REMOTE_DIR\\service.log & $REMOTE_DIR\\nssm.exe set $SERVICE AppStderr $REMOTE_DIR\\service.log & netsh advfirewall firewall delete rule name=$SERVICE$PORT >nul 2>&1 & netsh advfirewall firewall add rule name=$SERVICE$PORT dir=in action=allow protocol=TCP localport=$PORT & $REMOTE_DIR\\nssm.exe restart $SERVICE"
+ssh "$HOST" "$REMOTE_DIR\\nssm.exe install $SERVICE $REMOTE_DIR\\pdf-editor-server.exe 2>nul & $REMOTE_DIR\\nssm.exe set $SERVICE AppDirectory $REMOTE_DIR & $REMOTE_DIR\\nssm.exe set $SERVICE AppEnvironmentExtra PDF_EDITOR_PORT=$PORT PDF_EDITOR_WEB=$REMOTE_DIR\\web\\dist PDF_EDITOR_DATA=$REMOTE_DIR\\data & $REMOTE_DIR\\nssm.exe set $SERVICE Start SERVICE_AUTO_START & $REMOTE_DIR\\nssm.exe set $SERVICE AppStdout $REMOTE_DIR\\service.log & $REMOTE_DIR\\nssm.exe set $SERVICE AppStderr $REMOTE_DIR\\service.log & netsh advfirewall firewall delete rule name=$SERVICE$PORT >nul 2>&1 & netsh advfirewall firewall add rule name=$SERVICE$PORT dir=in action=allow protocol=TCP localport=$PORT & $REMOTE_DIR\\nssm.exe restart $SERVICE"
 
 echo "== 驗證 =="
 sleep 3
