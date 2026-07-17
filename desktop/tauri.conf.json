@@ -1,9 +1,13 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "PDF Editor",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "identifier": "asia.lichang.pdf-editor",
-  "build": {},
+  "build": {
+    "frontendDist": "../web/dist",
+    "beforeDevCommand": "npm run dev --prefix ../web",
+    "devUrl": "http://localhost:5173"
+  },
   "app": {
     "windows": [],
     "security": {
@@ -11,7 +15,42 @@
     }
   },
   "bundle": {
-    "active": false,
-    "icon": ["icons/icon.png"]
+    "active": true,
+    "targets": ["msi"],
+    "icon": ["icons/icon.png", "icons/icon.ico"],
+    "publisher": "Lichang",
+    "shortDescription": "PDF Editor desktop",
+    "longDescription": "Web PDF editor — local desktop shell with file association support.",
+    "resources": {
+      "../server/pdfium.dll": "pdfium.dll",
+      "../web/dist/": "web/dist/",
+      "../server/fonts/GenSenRoundedTW-R.ttf": "fonts/GenSenRoundedTW-R.ttf",
+      "../server/fonts/SIL_Open_Font_License_1.1.txt": "fonts/SIL_Open_Font_License_1.1.txt"
+    },
+    "fileAssociations": [
+      {
+        "ext": ["pdf"],
+        "name": "PDF Document",
+        "description": "Portable Document Format",
+        "mimeType": "application/pdf",
+        "role": "Editor"
+      }
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "wix": {
+        "language": {
+          "zh-TW": {
+            "localePath": "windows/zh-TW.wxl"
+          }
+        },
+        "template": "windows/main.wxs",
+        "fragmentPaths": ["windows/fragments/default-pdf.wxs"],
+        "componentRefs": ["DefaultPdfAssociation"]
+      }
+    }
   }
 }

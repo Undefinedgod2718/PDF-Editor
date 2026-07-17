@@ -39,6 +39,7 @@
 
 ## TODO（實作時補）
 
-- [ ] Tauri `fileAssociations`（.pdf 關聯）+ 單一實例（第二次雙擊開新分頁或新視窗？）
+- [x] Tauri `fileAssociations`（.pdf 關聯）+ WiX 安裝頁詢問是否設為預設 PDF（`SETDEFAULTPDF`）
+- [ ] 單一實例（第二次雙擊開新分頁或新視窗？）
 - [ ] `mode` flag 注入方式（Vite define vs runtime 偵測 `window.__TAURI__`）
-- [ ] WebView2 離線安裝器 bundle 設定
+- [x] WebView2 離線安裝器 bundle 設定（`downloadBootstrapper`；可改 `embedBootstrapper`）

@@ -38,6 +38,13 @@ interface FlashTarget {
   key: number
 }
 
+declare global {
+  interface Window {
+    __PDF_EDITOR_STARTUP_DOC__?: string
+    __PDF_EDITOR_STARTUP_ERROR__?: string
+  }
+}
+
 export default function App() {
   const [doc, setDoc] = useState<DocInfo | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -199,6 +206,19 @@ export default function App() {
     },
     [loadDoc, tryHandleEncrypted],
   )
+
+  // 桌面版：檔案關聯／CLI 啟動時 Rust 已 open_path，init script 注入 doc id。
+  useEffect(() => {
+    const id = window.__PDF_EDITOR_STARTUP_DOC__
+    const startupError = window.__PDF_EDITOR_STARTUP_ERROR__
+    delete window.__PDF_EDITOR_STARTUP_DOC__
+    delete window.__PDF_EDITOR_STARTUP_ERROR__
+    if (id) {
+      void openDocById(id)
+    } else if (startupError) {
+      setError(startupError)
+    }
+  }, [openDocById])
 
   const gotoPage = useCallback((p: number) => {
     viewerRef.current?.scrollToPage(p)
