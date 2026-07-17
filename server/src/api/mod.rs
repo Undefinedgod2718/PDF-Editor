@@ -7,12 +7,17 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::pdf::{annots, compress, exportops, formops, imageops, objects, ops, pageops, protect};
+use crate::pdf::{
+    annots, compare, compress, exportops, formbuild, formops, imageops, objects, ops, pageops,
+    protect,
+};
 use crate::sidecar;
 use crate::SharedState;
+use crate::llm;
 
 pub fn router() -> Router<SharedState> {
     Router::new()
+        .route("/api/health", get(health))
         .route("/api/documents", post(upload).get(list_docs))
         .route("/api/documents/{id}/info", get(doc_info))
         .route("/api/documents/{id}/pages/{page}/render", get(render_page))
@@ -51,6 +56,7 @@ pub fn router() -> Router<SharedState> {
         )
         .route("/api/documents/{id}/pages/reorder", post(reorder_pages))
         .route("/api/documents/merge", post(merge_documents))
+        .route("/api/documents/compare", post(compare_documents))
         .route("/api/documents/{id}/extract", post(extract_pages))
         .route(
             "/api/documents/{id}/pages/{page}/objects",
@@ -70,8 +76,14 @@ pub fn router() -> Router<SharedState> {
         )
         .route("/api/documents/{id}/form", get(list_form_fields))
         .route(
+            "/api/documents/{id}/pages/{page}/form",
+            post(create_form_field),
+        )
+        .route(
             "/api/documents/{id}/pages/{page}/form/{index}",
-            post(set_form_field),
+            post(set_form_field)
+                .patch(update_form_field)
+                .delete(delete_form_field),
         )
         .route("/api/stamps", post(upload_stamp).get(list_stamps))
         .route(
@@ -102,6 +114,21 @@ impl From<anyhow::Error> for ApiError {
 
 fn not_found() -> ApiError {
     ApiError(StatusCode::NOT_FOUND, "document not found".into())
+}
+
+/// Liveness + dependency probe. `sidecar.ok=false` means docx/xlsx export is
+/// broken (missing Python interpreter or convert.py) — poll this from log/
+/// monitoring scripts instead of waiting for a user-facing 500.
+async fn health() -> impl IntoResponse {
+    let sidecar_status = match sidecar::health() {
+        Ok((python, script)) => serde_json::json!({
+            "ok": true,
+            "python": python.display().to_string(),
+            "script": script.display().to_string(),
+        }),
+        Err(e) => serde_json::json!({ "ok": false, "error": e }),
+    };
+    Json(serde_json::json!({ "status": "ok", "sidecar": sidecar_status }))
 }
 
 async fn upload(
@@ -476,6 +503,111 @@ async fn set_form_field(
     Ok(Json(serde_json::json!({ "ok": true, "revision": revision })))
 }
 
+/// Wraps `formbuild::FormBuildError` so it can cross `engine.run`'s
+/// `anyhow::Result<T>` boundary (the closure signature is fixed to
+/// `anyhow::Result`, unlike the `spawn_blocking` jobs the protect/encrypt
+/// handlers use) and be downcast back into its typed User/Internal variant
+/// afterwards, mirroring `map_protect_err`'s handling of `ProtectError`.
+struct FormBuildErrWrap(formbuild::FormBuildError);
+
+impl std::fmt::Debug for FormBuildErrWrap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.0 {
+            formbuild::FormBuildError::User(msg) => write!(f, "{msg}"),
+            formbuild::FormBuildError::Internal(err) => write!(f, "{err:?}"),
+        }
+    }
+}
+
+impl std::fmt::Display for FormBuildErrWrap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.0 {
+            formbuild::FormBuildError::User(msg) => write!(f, "{msg}"),
+            formbuild::FormBuildError::Internal(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+impl std::error::Error for FormBuildErrWrap {}
+
+fn map_formbuild_err(e: anyhow::Error) -> ApiError {
+    match e.downcast::<FormBuildErrWrap>() {
+        Ok(FormBuildErrWrap(formbuild::FormBuildError::User(msg))) => {
+            ApiError(StatusCode::BAD_REQUEST, msg)
+        }
+        Ok(FormBuildErrWrap(formbuild::FormBuildError::Internal(err))) => {
+            tracing::error!("form build failed: {err:#}");
+            ApiError(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "form field operation failed".into(),
+            )
+        }
+        Err(e) => ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+async fn create_form_field(
+    State(state): State<SharedState>,
+    Path((id, page)): Path<(Uuid, u16)>,
+    Json(body): Json<formbuild::NewField>,
+) -> Result<impl IntoResponse, ApiError> {
+    state.storage.get(id).ok_or_else(not_found)?;
+    let path = state.storage.pdf_path(id);
+    state
+        .engine
+        .run(move |_pdfium, cache| {
+            formbuild::create_field(&path, page, &body)
+                .map_err(|e| anyhow::Error::new(FormBuildErrWrap(e)))?;
+            cache.invalidate(&path);
+            Ok(())
+        })
+        .await
+        .map_err(map_formbuild_err)?;
+    let revision = state.storage.bump_revision(id)?;
+    Ok(Json(serde_json::json!({ "ok": true, "revision": revision })))
+}
+
+async fn update_form_field(
+    State(state): State<SharedState>,
+    Path((id, page, index)): Path<(Uuid, u16, usize)>,
+    Json(body): Json<formbuild::FieldUpdate>,
+) -> Result<impl IntoResponse, ApiError> {
+    state.storage.get(id).ok_or_else(not_found)?;
+    let path = state.storage.pdf_path(id);
+    state
+        .engine
+        .run(move |_pdfium, cache| {
+            formbuild::update_field(&path, page, index, &body)
+                .map_err(|e| anyhow::Error::new(FormBuildErrWrap(e)))?;
+            cache.invalidate(&path);
+            Ok(())
+        })
+        .await
+        .map_err(map_formbuild_err)?;
+    let revision = state.storage.bump_revision(id)?;
+    Ok(Json(serde_json::json!({ "ok": true, "revision": revision })))
+}
+
+async fn delete_form_field(
+    State(state): State<SharedState>,
+    Path((id, page, index)): Path<(Uuid, u16, usize)>,
+) -> Result<impl IntoResponse, ApiError> {
+    state.storage.get(id).ok_or_else(not_found)?;
+    let path = state.storage.pdf_path(id);
+    state
+        .engine
+        .run(move |_pdfium, cache| {
+            formbuild::delete_field(&path, page, index)
+                .map_err(|e| anyhow::Error::new(FormBuildErrWrap(e)))?;
+            cache.invalidate(&path);
+            Ok(())
+        })
+        .await
+        .map_err(map_formbuild_err)?;
+    let revision = state.storage.bump_revision(id)?;
+    Ok(Json(serde_json::json!({ "ok": true, "revision": revision })))
+}
+
 async fn upload_stamp(
     State(state): State<SharedState>,
     mut multipart: Multipart,
@@ -777,6 +909,73 @@ async fn merge_documents(
     let filename = body.filename.unwrap_or_else(|| "merged.pdf".into());
     let meta = state.storage.save(filename, &bytes, None)?;
     Ok(Json(serde_json::to_value(&meta.for_client()).unwrap()))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CompareBody {
+    old_id: Uuid,
+    new_id: Uuid,
+    filename: Option<String>,
+    #[serde(default = "default_true")]
+    visual_diff: bool,
+    #[serde(default = "default_true")]
+    llm_summary: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+async fn compare_documents(
+    State(state): State<SharedState>,
+    Json(body): Json<CompareBody>,
+) -> Result<impl IntoResponse, ApiError> {
+    let old_meta = state.storage.get(body.old_id).ok_or_else(not_found)?;
+    let new_meta = state.storage.get(body.new_id).ok_or_else(not_found)?;
+    let old_path = state.storage.pdf_path(body.old_id);
+    let new_path = state.storage.pdf_path(body.new_id);
+    let opts = compare::CompareOptions {
+        visual_diff: body.visual_diff,
+    };
+
+    let (mut report, bytes) = state
+        .engine
+        .run(move |pdfium, _cache| compare::compare(pdfium, &old_path, &new_path, &opts))
+        .await?;
+
+    let filename = body
+        .filename
+        .unwrap_or_else(|| format!("compare_{}_vs_{}", old_meta.filename, new_meta.filename));
+    // pdfium can't write /NM; stamp on a temp file *before* library save so a
+    // failed lopdf pass never leaves a half-registered document (unlike
+    // create_annotation which mutates an already-owned path in place).
+    let tmp = std::env::temp_dir().join(format!("pdf-editor-compare-{}.pdf", Uuid::new_v4()));
+    std::fs::write(&tmp, &bytes).map_err(|e| {
+        ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+    })?;
+    let named_bytes = match annots::ensure_annotation_names(&tmp).and_then(|_| {
+        std::fs::read(&tmp).map_err(anyhow::Error::from)
+    }) {
+        Ok(b) => {
+            let _ = std::fs::remove_file(&tmp);
+            b
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e.into());
+        }
+    };
+    let out_meta = state.storage.save(filename, &named_bytes, None)?;
+
+    if body.llm_summary {
+        report.summary = llm::summarize_diff(&report).await;
+    }
+
+    Ok(Json(serde_json::json!({
+        "document": out_meta.for_client(),
+        "report": report,
+    })))
 }
 
 #[derive(Deserialize)]

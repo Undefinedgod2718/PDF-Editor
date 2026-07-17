@@ -1,8 +1,10 @@
 pub mod annots;
+pub mod compare;
 pub mod compress;
 pub mod engine;
 pub mod exportops;
 pub mod font;
+pub mod formbuild;
 pub mod formops;
 pub mod imageops;
 pub mod objects;

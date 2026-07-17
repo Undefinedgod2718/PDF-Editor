@@ -215,11 +215,25 @@ pub fn create(
     stamp_image: Option<image::DynamicImage>,
 ) -> anyhow::Result<usize> {
     with_document(pdfium, path, |doc| {
-        // Font token must be taken before the page borrows the document.
-        // CJK-capable font preferred (GenSen Rounded TW, SIL OFL), subset to
-        // just the glyphs this annotation uses so the file stays small; fall
-        // back to built-in Helvetica (ASCII only) when unavailable.
-        let font = match ann {
+        create_on_doc(doc, page_index, ann, stamp_image)
+    })
+}
+
+/// Same as [create], but operates on an already-open document instead of
+/// loading one from a path. Used by `compare.rs`, which burns diff
+/// annotations into an in-memory document it is still assembling (a copy of
+/// the "new" doc plus appended old-only pages) before ever writing it out.
+pub(crate) fn create_on_doc(
+    doc: &mut PdfDocument,
+    page_index: u16,
+    ann: &NewAnnotation,
+    stamp_image: Option<image::DynamicImage>,
+) -> anyhow::Result<usize> {
+    // Font token must be taken before the page borrows the document.
+    // CJK-capable font preferred (GenSen Rounded TW, SIL OFL), subset to
+    // just the glyphs this annotation uses so the file stays small; fall
+    // back to built-in Helvetica (ASCII only) when unavailable.
+    let font = match ann {
             NewAnnotation::FreeText { contents, .. } => super::font::full_font_bytes()
                 .and_then(|full| {
                     super::font::subset_for_text(full, contents)
@@ -344,8 +358,7 @@ pub fn create(
                 a.objects_mut().add_image_object(obj)?;
             }
         }
-        Ok(annotations.len() as usize)
-    })
+    Ok(annotations.len() as usize)
 }
 
 pub fn list(doc: &PdfDocument, page_index: u16) -> anyhow::Result<Vec<AnnotationInfo>> {

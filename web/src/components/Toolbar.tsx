@@ -15,6 +15,8 @@ interface Props {
   toggleCrop: () => void
   imageMode: boolean
   toggleImageMode: () => void
+  formBuilderMode: boolean
+  toggleFormBuilder: () => void
   showExport: boolean
   toggleExport: () => void
   showCompress: boolean
@@ -23,6 +25,8 @@ interface Props {
   toggleProtect: () => void
   showEncrypt: boolean
   toggleEncrypt: () => void
+  showCompare: boolean
+  toggleCompare: () => void
 }
 
 const ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]
@@ -42,6 +46,8 @@ export default function Toolbar({
   toggleCrop,
   imageMode,
   toggleImageMode,
+  formBuilderMode,
+  toggleFormBuilder,
   showExport,
   toggleExport,
   showCompress,
@@ -50,6 +56,8 @@ export default function Toolbar({
   toggleProtect,
   showEncrypt,
   toggleEncrypt,
+  showCompare,
+  toggleCompare,
 }: Props) {
   const zoomIn = () => {
     const next = ZOOM_STEPS.find((z) => z > scale + 0.001)
@@ -147,6 +155,13 @@ export default function Toolbar({
         <button className={`tb-btn ${imageMode ? 'active' : ''}`} title="影像" onClick={toggleImageMode}>
           影像
         </button>
+        <button
+          className={`tb-btn ${formBuilderMode ? 'active' : ''}`}
+          title="建立表單"
+          onClick={toggleFormBuilder}
+        >
+          📝
+        </button>
         <button className={`tb-btn ${showExport ? 'active' : ''}`} title="匯出" onClick={toggleExport}>
           匯出
         </button>
@@ -158,6 +173,9 @@ export default function Toolbar({
         </button>
         <button className={`tb-btn ${showEncrypt ? 'active' : ''}`} title="加密" onClick={toggleEncrypt}>
           加密
+        </button>
+        <button className={`tb-btn ${showCompare ? 'active' : ''}`} title="比較" onClick={toggleCompare}>
+          比較
         </button>
       </div>
     </div>

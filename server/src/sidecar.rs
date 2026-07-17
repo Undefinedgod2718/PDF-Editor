@@ -90,8 +90,10 @@ fn resolve_python() -> anyhow::Result<PathBuf> {
         &[
             // dev: cwd = server/
             "../python/.venv/Scripts/python.exe",
+            "../python/.venv/bin/python",
             // cwd = repo root
             "python/.venv/Scripts/python.exe",
+            "python/.venv/bin/python",
             // deployment: embedded Python zip at C:\PDFEditor\python
             "python/python.exe",
         ],
@@ -105,6 +107,15 @@ fn resolve_script() -> anyhow::Result<PathBuf> {
         &["../python/convert.py", "python/convert.py"],
         "convert.py",
     )
+}
+
+/// Startup / health probe: report whether the office-conversion sidecar is
+/// usable, so a broken install surfaces at boot and in `/api/health` instead
+/// of as a 500 on the first export request. Returns the resolved paths.
+pub fn health() -> Result<(PathBuf, PathBuf), String> {
+    let python = resolve_python().map_err(|e| e.to_string())?;
+    let script = resolve_script().map_err(|e| e.to_string())?;
+    Ok((python, script))
 }
 
 /// Hard cap on a single conversion; pdf2docx on a large scanned document can

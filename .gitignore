@@ -16,6 +16,7 @@ python/.testout/
 # Deploy staging / Windows service helper (binaries, built dist)
 deploy/stage/
 deploy/*.exe
+deploy/.env
 
 # Docs (local only)
 README.md

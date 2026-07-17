@@ -310,6 +310,8 @@ export interface FormField {
   /** 後端取不到 widget bounds 時為 null，前端須過濾。 */
   rect: Rect | null
   writable: boolean
+  /** AcroForm `/Ff` Required bit。 */
+  required: boolean
 }
 
 export async function fetchDocForm(id: string): Promise<FormField[]> {
@@ -328,6 +330,62 @@ export async function setFormFieldValue(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
+  return jsonOrThrow(res)
+}
+
+// ---------- 表單建立（P14）----------
+
+/** POST .../form 的請求體，比照 annots.ts CreateAnnotationRequest 的 tag 風格。
+ *  rect 一律 points、左上原點，與 annotations 相同約定。 */
+export type NewFormField =
+  | {
+      fieldType: 'text'
+      name: string
+      rect: Rect
+      multiline?: boolean
+      required?: boolean
+      fontSize?: number
+      defaultValue?: string
+    }
+  | { fieldType: 'checkbox'; name: string; rect: Rect; required?: boolean }
+  | { fieldType: 'radio'; name: string; options: { value: string; rect: Rect }[]; required?: boolean }
+  | { fieldType: 'combobox'; name: string; rect: Rect; options: string[]; required?: boolean }
+  | { fieldType: 'listbox'; name: string; rect: Rect; options: string[]; required?: boolean }
+  | { fieldType: 'signature'; name: string; rect: Rect }
+
+/** PATCH .../form/{index} 的請求體；至少帶一個鍵。 */
+export interface FormFieldUpdate {
+  rect?: Rect
+  name?: string
+  options?: string[]
+  required?: boolean
+}
+
+export async function createFormField(id: string, page: number, field: NewFormField): Promise<Mutated> {
+  const res = await fetch(`/api/documents/${id}/pages/${page}/form`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(field),
+  })
+  return jsonOrThrow(res)
+}
+
+export async function updateFormField(
+  id: string,
+  page: number,
+  index: number,
+  update: FormFieldUpdate,
+): Promise<Mutated> {
+  const res = await fetch(`/api/documents/${id}/pages/${page}/form/${index}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(update),
+  })
+  return jsonOrThrow(res)
+}
+
+export async function deleteFormField(id: string, page: number, index: number): Promise<Mutated> {
+  const res = await fetch(`/api/documents/${id}/pages/${page}/form/${index}`, { method: 'DELETE' })
   return jsonOrThrow(res)
 }
 
@@ -647,4 +705,75 @@ export async function decryptDocument(id: string, password: string, filename?: s
   const blob = await res.blob()
   const outFilename = parseFilenameFromDisposition(res.headers.get('Content-Disposition'), 'pdf')
   triggerDownload(blob, outFilename)
+}
+
+// ---------- 比較（Phase 13）----------
+//
+// 比較兩份文件的文字內容與視覺（像素）差異，並可選擇串接 LLM 產生自然語言
+// 摘要。輸出是「下載即入庫」：一份新文件（新增/刪除/修改處已標註），
+// 跟 merge/extract 一樣存回文件庫（不同於 Phase 12 加密的「只下載」，因為
+// 這份輸出檔本身仍可正常檢視／編輯）。
+
+export type CompareChangeKind = 'added' | 'deleted'
+
+export interface CompareTextChange {
+  kind: CompareChangeKind
+  rects: Rect[]
+  excerpt: string
+}
+
+export interface ComparePageDiff {
+  oldPage: number | null
+  newPage: number | null
+  textChanges: CompareTextChange[]
+  visualChanged: boolean
+  visualRegions: Rect[]
+}
+
+export interface CompareStats {
+  pagesAdded: number
+  pagesDeleted: number
+  pagesModified: number
+  textChangesTotal: number
+}
+
+export interface CompareReport {
+  oldPageCount: number
+  newPageCount: number
+  pages: ComparePageDiff[]
+  stats: CompareStats
+  /** LLM 產生的摘要；未設定 ANTHROPIC_API_KEY 或呼叫失敗時為 null。 */
+  summary: string | null
+}
+
+export interface CompareResult {
+  document: DocMeta
+  report: CompareReport
+}
+
+export interface CompareOptions {
+  /** 是否同時執行像素層級的視覺差異比對；預設 true。 */
+  visualDiff?: boolean
+  /** 是否呼叫 LLM 產生摘要（後端未設金鑰時仍會安全跳過）；預設 true。 */
+  llmSummary?: boolean
+  /** 可選；省略則後端預設為 compare_<原文件名>_vs_<新文件名>。 */
+  filename?: string
+}
+
+export async function compareDocuments(
+  oldId: string,
+  newId: string,
+  opts?: CompareOptions,
+): Promise<CompareResult> {
+  const body: Record<string, unknown> = { oldId, newId }
+  if (opts?.visualDiff !== undefined) body.visualDiff = opts.visualDiff
+  if (opts?.llmSummary !== undefined) body.llmSummary = opts.llmSummary
+  if (opts?.filename !== undefined) body.filename = opts.filename
+
+  const res = await fetch('/api/documents/compare', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return jsonOrThrow(res)
 }
