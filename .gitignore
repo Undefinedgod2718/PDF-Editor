@@ -8,6 +8,9 @@ target/
 # Runtime uploads
 server/data/
 
+# Local pdfium binary (Linux dev; deploy scripts fetch their own)
+server/libpdfium.so
+
 # Python sidecar venv / test artifacts
 python/.venv/
 python/.testout/
@@ -15,11 +18,11 @@ python/.testout/
 
 # Deploy staging / Windows service helper (binaries, built dist)
 deploy/stage/
-deploy/*.exe
+deploy/**/*.exe
 deploy/.env
 
-# Docs (local only)
-README.md
+# Docs (local only; deploy/README.md is tracked)
+/README.md
 wiki/
 
 # Agent tooling (not part of the product)

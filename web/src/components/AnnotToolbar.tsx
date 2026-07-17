@@ -11,6 +11,7 @@ export type AnnotTool =
   | 'freeText'
   | 'stamp'
   | 'editText'
+  | 'editLine'
   | 'draw'
   | 'form'
   | 'sign'
@@ -39,6 +40,7 @@ const TOOLS: { id: AnnotTool; icon: string; title: string }[] = [
   { id: 'freeText', icon: '🔤', title: '文字框' },
   { id: 'stamp', icon: '🖃', title: '印章' },
   { id: 'editText', icon: '✎', title: '編輯文字' },
+  { id: 'editLine', icon: '☰', title: '行編輯' },
   { id: 'draw', icon: '🎨', title: '繪圖' },
   { id: 'form', icon: '📋', title: '表單' },
   { id: 'sign', icon: '✍', title: '簽名' },

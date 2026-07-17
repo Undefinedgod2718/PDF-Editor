@@ -11,6 +11,7 @@ import FormLayer from './FormLayer'
 import CropLayer from './CropLayer'
 import ImageLayer from './ImageLayer'
 import FormBuilderLayer from './FormBuilderLayer'
+import TextLineLayer from './TextLineLayer'
 import type { AnnotTool } from './AnnotToolbar'
 import type { BuilderFieldType } from './FormBuilderBar'
 
@@ -211,6 +212,15 @@ const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(
               flashRect={flash && flash.page === page.index ? flash.rect : null}
               flashKey={flash?.key ?? 0}
             />
+            {tool === 'editLine' && (
+              <TextLineLayer
+                docId={doc.id}
+                page={page.index}
+                scale={scale}
+                version={pageVersions[page.index] ?? 0}
+                onChanged={() => onAnnotationChanged(page.index)}
+              />
+            )}
             {formBuilderMode && page.index === currentPage ? (
               <FormBuilderLayer
                 docId={doc.id}

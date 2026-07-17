@@ -47,7 +47,7 @@ interface Props {
 const TEXT_TOOLS: AnnotTool[] = ['highlight', 'underline', 'strikeout', 'squiggly']
 
 /** 這些工具不使用 AnnotLayer 的拖曳/繪製互動（表單填寫、簽名皆有自己的 UI）。 */
-const PASSIVE_TOOLS: AnnotTool[] = ['select', 'editText', 'form', 'sign']
+const PASSIVE_TOOLS: AnnotTool[] = ['select', 'editText', 'editLine', 'form', 'sign']
 
 function pxRect(a: PxPoint, b: PxPoint) {
   return {

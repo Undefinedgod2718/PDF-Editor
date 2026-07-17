@@ -11,6 +11,7 @@ pub mod objects;
 pub mod ops;
 pub mod pageops;
 pub mod protect;
+pub mod textedit;
 
 use std::path::Path;
 

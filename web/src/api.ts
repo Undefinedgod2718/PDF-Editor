@@ -288,6 +288,74 @@ export async function deletePageObject(id: string, page: number, index: number):
   return jsonOrThrow(res)
 }
 
+// ---------- 行編輯（P15：有限文字編輯，不做 reflow）----------
+
+/** 文字行（同基線的文字物件群組），index 依由上而下排序，任何變更後需重新 GET。 */
+export interface LineInfo {
+  index: number
+  text: string
+  x: number
+  y: number
+  w: number
+  h: number
+  font_size: number
+  /** 行首物件填色 RGBA。 */
+  color: [number, number, number, number]
+  /** 組成此行的頁面物件 index。 */
+  objects: number[]
+}
+
+export async function listPageLines(id: string, page: number): Promise<LineInfo[]> {
+  const res = await fetch(`/api/documents/${id}/pages/${page}/lines`)
+  return jsonOrThrow(res)
+}
+
+export async function editPageLine(
+  id: string,
+  page: number,
+  index: number,
+  text: string,
+): Promise<Mutated> {
+  const res = await fetch(`/api/documents/${id}/pages/${page}/lines/${index}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  })
+  return jsonOrThrow(res)
+}
+
+/** 在 after 行下方插入新行，複製其字級/顏色/左緣；shiftDown 先把下方內容下移一行。 */
+export async function insertPageLine(
+  id: string,
+  page: number,
+  after: number,
+  text: string,
+  shiftDown: boolean,
+): Promise<Mutated> {
+  const res = await fetch(`/api/documents/${id}/pages/${page}/lines`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ after, text, shift_down: shiftDown }),
+  })
+  return jsonOrThrow(res)
+}
+
+/** 垂直平移一行（delta 為點數，正值向下）；andBelow 連同下方所有行一起移。 */
+export async function shiftPageLine(
+  id: string,
+  page: number,
+  index: number,
+  delta: number,
+  andBelow: boolean,
+): Promise<Mutated> {
+  const res = await fetch(`/api/documents/${id}/pages/${page}/lines/${index}/shift`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ delta, and_below: andBelow }),
+  })
+  return jsonOrThrow(res)
+}
+
 // ---------- 表單填寫（Phase 4）----------
 
 export type FormFieldType =
