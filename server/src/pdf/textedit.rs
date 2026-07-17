@@ -322,12 +322,12 @@ pub fn shift_line(
         let lines = group_lines(collect_runs(&page)?);
         let line = get_line(&lines, line_index)?;
         let mut targets: Vec<usize> = line.runs.iter().map(|r| r.object_index).collect();
+        // Reading order is top-to-bottom; every later line is "below". Do not
+        // filter by geometry — adjacent lines often share a baseline edge
+        // (other.top() >= ref_bottom) and would be skipped by a strict < check.
         if req.and_below {
-            let ref_bottom = line.bottom();
             for other in &lines[line_index + 1..] {
-                if other.top() < ref_bottom {
-                    targets.extend(other.runs.iter().map(|r| r.object_index));
-                }
+                targets.extend(other.runs.iter().map(|r| r.object_index));
             }
         }
         for i in targets {
