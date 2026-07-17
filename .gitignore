@@ -35,3 +35,6 @@ wiki/
 Thumbs.db
 .vscode/
 .idea/
+
+# Tauri build artifacts
+desktop/gen/
