@@ -1,13 +1,25 @@
 #!/bin/bash
-# Deploy PDF Editor → sgsac001 (Ubuntu). Run via WSL bash (LF), not PowerShell.
-# Host: richard@192.168.17.56  |  app: /mnt/d/DockerRoot/pdf-editor  |  port: 8050
+# PDF Editor — Linux 部署（systemd user unit）。在開發機 bash / WSL 執行（LF）。
+# 模式：傳原始碼到遠端，遠端 cargo build --release，掛 systemd --user 服務。
 #
-# Auth: export SSHPASS from ops vault (never commit). Optional: deploy/.env (gitignored).
-#   export SSHPASS='…'   # or: set -a; source deploy/.env; set +a
+# 認證二選一：
+#   - SSH 金鑰：什麼都不用設，直接跑。
+#   - 密碼：export SSHPASS='…'（或放 deploy/.env，gitignored），改走 sshpass。
+#
+# 可用環境變數覆寫（預設值 = 既有 sgsac001 部署）：
+#   HOST        ssh 目標（user@host）
+#   ROOT        本機 repo 根目錄（預設自動偵測腳本位置）
+#   REMOTE_APP  遠端安裝目錄
+#   PORT        服務埠
+#   PDFIUM_URL  libpdfium.so 下載來源（bblanchon/pdfium-binaries）
 set -euo pipefail
 
 HOST="${HOST:-richard@192.168.17.56}"
-ROOT="${ROOT:-/mnt/d/Program_Coding/PDF Editor}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="${ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+REMOTE_APP="${REMOTE_APP:-/mnt/d/DockerRoot/pdf-editor}"
+PORT="${PORT:-8050}"
+PDFIUM_URL="${PDFIUM_URL:-https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F7947/pdfium-linux-x64.tgz}"
 
 # Load optional local secrets file (not in git).
 if [ -f "$ROOT/deploy/.env" ]; then
@@ -18,17 +30,15 @@ if [ -f "$ROOT/deploy/.env" ]; then
   set +a
 fi
 
-if [ -z "${SSHPASS:-}" ]; then
-  echo "FATAL: SSHPASS unset. Export it (or put SSHPASS=… in deploy/.env). No hardcoded passwords." >&2
-  exit 1
+if [ -n "${SSHPASS:-}" ]; then
+  export SSHPASS
+  SSH=(sshpass -e ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no)
+  SCP=(sshpass -e scp -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no)
+else
+  SSH=(ssh -o StrictHostKeyChecking=no)
+  SCP=(scp -o StrictHostKeyChecking=no)
 fi
-export SSHPASS
 
-SSH=(sshpass -e ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no)
-SCP=(sshpass -e scp -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no)
-
-REMOTE_APP="/mnt/d/DockerRoot/pdf-editor"
-PDFIUM_URL="https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F7947/pdfium-linux-x64.tgz"
 STAGE=$(mktemp -d /tmp/pdf-editor-stage.XXXXXX)
 trap 'rm -rf "$STAGE"' EXIT
 
@@ -40,6 +50,7 @@ mkdir -p "$STAGE/pack"
 tar -C "$ROOT" \
   --exclude='server/target' \
   --exclude='server/pdfium.dll' \
+  --exclude='server/libpdfium.so' \
   --exclude='web/node_modules' \
   --exclude='web/dist' \
   --exclude='.git' \
@@ -59,6 +70,7 @@ cat > "$STAGE/remote_install.sh" <<REMOTE
 set -euo pipefail
 export PATH="/mnt/c/tools/bin:\$HOME/.cargo/bin:\$PATH"
 APP=$REMOTE_APP
+PORT=$PORT
 BIN=\$APP/bin
 DATA=\$APP/data
 WEB=\$APP/web/dist
@@ -127,13 +139,13 @@ echo "== systemd user unit =="
 mkdir -p "\$HOME/.config/systemd/user"
 cat > "\$HOME/.config/systemd/user/pdf-editor.service" <<EOF
 [Unit]
-Description=PDF Editor (sgsac001)
+Description=PDF Editor
 After=network.target
 
 [Service]
 Type=simple
 WorkingDirectory=\$BIN
-Environment=PDF_EDITOR_PORT=8050
+Environment=PDF_EDITOR_PORT=\$PORT
 Environment=PDF_EDITOR_DATA=\$DATA
 Environment=PDF_EDITOR_WEB=\$WEB
 Environment=PDF_EDITOR_PYTHON=\$APP/python/.venv/bin/python
@@ -156,10 +168,10 @@ loginctl enable-linger "\$(whoami)" 2>/dev/null || true
 
 sleep 2
 systemctl --user --no-pager --full status pdf-editor.service || true
-ss -lnt | grep 8050 || true
-curl -s -o /dev/null -w "local_api=%{http_code}\\n" http://127.0.0.1:8050/api/documents || true
+ss -lnt | grep "\$PORT" || true
+curl -s -o /dev/null -w "local_api=%{http_code}\\n" "http://127.0.0.1:\$PORT/api/documents" || true
 echo "== health (sidecar must be ok:true) =="
-curl -s http://127.0.0.1:8050/api/health || true
+curl -s "http://127.0.0.1:\$PORT/api/health" || true
 echo
 echo REMOTE_INSTALL_OK
 REMOTE
@@ -177,6 +189,7 @@ echo "== remote install =="
 
 echo "== console verify =="
 sleep 1
-curl -s -o /dev/null -w "http://192.168.17.56:8050/api/documents -> HTTP %{http_code}\n" \
-  http://192.168.17.56:8050/api/documents
+HOST_IP=${HOST#*@}
+curl -s -o /dev/null -w "http://$HOST_IP:$PORT/api/documents -> HTTP %{http_code}\n" \
+  "http://$HOST_IP:$PORT/api/documents"
 echo DEPLOY_DONE

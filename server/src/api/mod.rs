@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::pdf::{
     annots, compare, compress, exportops, formbuild, formops, imageops, objects, ops, pageops,
-    protect,
+    protect, textedit,
 };
 use crate::sidecar;
 use crate::SharedState;
@@ -73,6 +73,18 @@ pub fn router() -> Router<SharedState> {
         .route(
             "/api/documents/{id}/pages/{page}/images/{index}",
             post(replace_page_image),
+        )
+        .route(
+            "/api/documents/{id}/pages/{page}/lines",
+            get(list_text_lines).post(insert_text_line),
+        )
+        .route(
+            "/api/documents/{id}/pages/{page}/lines/{index}",
+            axum::routing::patch(edit_text_line),
+        )
+        .route(
+            "/api/documents/{id}/pages/{page}/lines/{index}/shift",
+            post(shift_text_line),
         )
         .route("/api/documents/{id}/form", get(list_form_fields))
         .route(
@@ -354,6 +366,76 @@ async fn delete_page_object(
         .engine
         .run(move |pdfium, cache| {
             objects::delete_object(pdfium, &path, page, index)?;
+            cache.invalidate(&path);
+            Ok(())
+        })
+        .await?;
+    let revision = state.storage.bump_revision(id)?;
+    Ok(Json(serde_json::json!({ "ok": true, "revision": revision })))
+}
+
+async fn list_text_lines(
+    State(state): State<SharedState>,
+    Path((id, page)): Path<(Uuid, u16)>,
+) -> Result<impl IntoResponse, ApiError> {
+    state.storage.get(id).ok_or_else(not_found)?;
+    let path = state.storage.pdf_path(id);
+    let items = state
+        .engine
+        .run(move |pdfium, cache| textedit::list_lines(cache.open(pdfium, &path)?, page))
+        .await?;
+    Ok(Json(items))
+}
+
+async fn insert_text_line(
+    State(state): State<SharedState>,
+    Path((id, page)): Path<(Uuid, u16)>,
+    Json(body): Json<textedit::InsertLine>,
+) -> Result<impl IntoResponse, ApiError> {
+    state.storage.get(id).ok_or_else(not_found)?;
+    let path = state.storage.pdf_path(id);
+    state
+        .engine
+        .run(move |pdfium, cache| {
+            textedit::insert_line(pdfium, &path, page, &body)?;
+            cache.invalidate(&path);
+            Ok(())
+        })
+        .await?;
+    let revision = state.storage.bump_revision(id)?;
+    Ok(Json(serde_json::json!({ "ok": true, "revision": revision })))
+}
+
+async fn edit_text_line(
+    State(state): State<SharedState>,
+    Path((id, page, index)): Path<(Uuid, u16, usize)>,
+    Json(body): Json<EditTextBody>,
+) -> Result<impl IntoResponse, ApiError> {
+    state.storage.get(id).ok_or_else(not_found)?;
+    let path = state.storage.pdf_path(id);
+    state
+        .engine
+        .run(move |pdfium, cache| {
+            textedit::edit_line(pdfium, &path, page, index, &body.text)?;
+            cache.invalidate(&path);
+            Ok(())
+        })
+        .await?;
+    let revision = state.storage.bump_revision(id)?;
+    Ok(Json(serde_json::json!({ "ok": true, "revision": revision })))
+}
+
+async fn shift_text_line(
+    State(state): State<SharedState>,
+    Path((id, page, index)): Path<(Uuid, u16, usize)>,
+    Json(body): Json<textedit::ShiftLine>,
+) -> Result<impl IntoResponse, ApiError> {
+    state.storage.get(id).ok_or_else(not_found)?;
+    let path = state.storage.pdf_path(id);
+    state
+        .engine
+        .run(move |pdfium, cache| {
+            textedit::shift_line(pdfium, &path, page, index, &body)?;
             cache.invalidate(&path);
             Ok(())
         })
