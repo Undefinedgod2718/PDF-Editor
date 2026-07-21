@@ -1,11 +1,14 @@
+[workspace]
+
 [package]
 name = "pdf-editor-mcp-server"
 version = "0.1.0"
 edition = "2021"
 
-# Standalone crate: this repo has no workspace Cargo.toml at the root, and
-# `server/` is a separate, independently-built crate. Keep it that way — do
-# not fold this into a workspace with `server/`.
+# Standalone crate: deliberately excluded from the root workspace (the
+# `[workspace]` table above, empty, stops cargo climbing up and pulling
+# this into that workspace). Keep it that way — do not fold this into a
+# workspace with `server/`.
 
 [[bin]]
 name = "pdf-editor-mcp-server"
