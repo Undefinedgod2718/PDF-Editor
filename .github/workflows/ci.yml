@@ -60,9 +60,17 @@ jobs:
           shared-key: windows-msi
       - name: Install tauri-cli
         run: cargo install tauri-cli --version "^2" --locked
+      - name: Fetch Tesseract traineddata
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path server/tessdata | Out-Null
+          foreach ($lang in @("eng", "chi_tra")) {
+            $out = "server/tessdata/$lang.traineddata"
+            curl.exe -fSL -o $out "https://github.com/tesseract-ocr/tessdata/raw/main/$lang.traineddata"
+          }
       - name: Build MSI
         shell: pwsh
-        run: .\deploy\windows\build-msi.ps1
+        run: .\scripts\build-msi.ps1
       - name: Upload MSI artifact
         uses: actions/upload-artifact@v4
         with:

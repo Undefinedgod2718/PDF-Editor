@@ -8,6 +8,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 pdf-editor-server = { path = "../server" }
+pdfium-render.workspace = true
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 serde.workspace = true
@@ -19,3 +20,15 @@ uuid.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+sha2 = "0.10"
+chrono = "0.4"
+
+# GDI 列印（見 src/print.rs）。只在 Windows 目標拉進來——這個殼目前也只出 Windows，
+# 但 target 條件讓「哪些程式碼是平台專屬」在相依表上就看得出來。
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_Controls_Dialogs",
+    "Win32_Storage_Xps",
+] }

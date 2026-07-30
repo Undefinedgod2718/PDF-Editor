@@ -49,7 +49,17 @@ export default function SearchPanel({
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') void run()
-            if (e.key === 'Escape') onClose()
+            if (e.key === 'Escape') {
+              // preventDefault 一定要下，否則同一下 Escape 會被吃兩次。React 對離散
+              // 事件同步 flush state，所以 onClose() 一回來，DocumentWorkspace 的
+              // keydown effect 已經用 showSearch === false 的閉包重新註冊了；事件這才
+              // 冒泡到 window，新的 listener 看不到搜尋還開著，就一路掉到最後的
+              // 「離開全螢幕」分支。全螢幕中按一下 Escape 會同時關搜尋＋退出全螢幕
+              // （2026-07-30 實機驗到）。DocumentWorkspace 的 Escape 分支開頭有
+              // `if (e.defaultPrevented) return`，這行就是要讓那個 guard 接手。
+              e.preventDefault()
+              onClose()
+            }
           }}
         />
         <button className="tb-btn" onClick={() => void run()} disabled={searching}>

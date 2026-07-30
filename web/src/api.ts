@@ -72,6 +72,18 @@ export interface AnnotationInfo {
   type: string
   rect: Rect | null
   contents: string | null
+  /** /T —— 留言作者。 */
+  author: string | null
+  /**
+   * 父註解的 nm（由後端 /IRT 解析而來）；頂層註解為 null。
+   * 注意：`pdf-core/src/pdf/annots.rs` 的 `AnnotationInfo` struct 沒有
+   * `#[serde(rename_all)]`，這欄跟下面 `reply_type` 在 wire 上是
+   * snake_case，不要「順手」改成 camelCase（跟本檔其餘欄位不同），
+   * 同樣的坑在上面 `RecentEntry` 也記過一份。
+   */
+  irt: string | null
+  /** /RT —— "R" 表示這是一則回覆；其餘情況為 null。 */
+  reply_type: string | null
 }
 
 export interface CharBox extends Rect {
@@ -182,6 +194,47 @@ export async function deleteAnnotation(
   return jsonOrThrow(res)
 }
 
+/** 編輯留言文字／作者／顏色／位置尺寸，至少要帶一個欄位；nm 必須是穩定 ID（沒有 index 退路）。
+ *  Stamp（文字框，見 annots.rs 模組說明）一律拒絕 contents/author 編輯並回 400；
+ *  color 只有標記類（Highlight/Underline/Strikeout/Squiggly）後端接受，其餘類型
+ *  外觀是「畫出來」而非由顏色欄位生成，同樣回 400（見 annots::set_color 註解）。
+ *  rect 只有 Ink/Stamp/Text 接受，四種文字標記類（Highlight/Underline/Strikeout/
+ *  Squiggly）幾何是貼在文字上的 QuadPoints，一律拒絕並回 400（見 annots::set_rect 註解）。 */
+export async function updateAnnotation(
+  id: string,
+  page: number,
+  nm: string,
+  body: { contents?: string; author?: string; color?: Color; rect?: Rect },
+): Promise<Mutated> {
+  const res = await fetch(
+    `/api/documents/${id}/pages/${page}/annotations/${encodeURIComponent(nm)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+  )
+  return jsonOrThrow(res)
+}
+
+/** 對指定註解新增一則回覆；回傳新回覆的 nm，用來在下次 GET 前就能定位到它。 */
+export async function replyToAnnotation(
+  id: string,
+  page: number,
+  parentNm: string,
+  body: { contents: string; author?: string },
+): Promise<{ ok: boolean; nm: string; revision: number }> {
+  const res = await fetch(
+    `/api/documents/${id}/pages/${page}/annotations/${encodeURIComponent(parentNm)}/replies`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+  )
+  return jsonOrThrow(res)
+}
+
 // ---------- 頁面操作（Phase 3）----------
 
 export async function listDocuments(): Promise<DocMeta[]> {
@@ -194,6 +247,16 @@ export async function rotatePage(id: string, page: number, degrees: 0 | 90 | 180
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ degrees }),
+  })
+  return jsonOrThrow(res)
+}
+
+/** 旋轉整份文件所有頁面（相對目前各頁角度），一次呼叫、一次寫檔。 */
+export async function rotateAllPages(id: string, delta: 90 | -90 | 180): Promise<Mutated> {
+  const res = await fetch(`/api/documents/${id}/pages/rotate-all`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ delta }),
   })
   return jsonOrThrow(res)
 }
@@ -547,7 +610,7 @@ export async function replaceImage(id: string, page: number, index: number, file
 
 // ---------- 匯出（Phase 8）----------
 
-export type ExportFormat = 'png' | 'jpg' | 'tiff' | 'pptx' | 'docx' | 'xlsx'
+export type ExportFormat = 'png' | 'jpg' | 'tiff' | 'pptx' | 'docx' | 'xlsx' | 'markdown'
 
 export interface ExportOptions {
   format: ExportFormat
@@ -644,6 +707,125 @@ export async function compressDocument(id: string, opts: CompressOptions): Promi
   if (opts.filename !== undefined) body.filename = opts.filename
 
   const res = await fetch(`/api/documents/${id}/compress`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return jsonOrThrow(res)
+}
+
+// ---------- OCR ----------
+
+export interface OcrOptions {
+  /** Tesseract 語言代碼，如 "eng+chi_tra"；省略則用後端預設。 */
+  langs?: string
+  /** 辨識解析度 DPI，範圍 36–600；省略則用後端預設（300）。 */
+  dpi?: number
+  /** 信心分數門檻 0–100，低於此值的字會被捨棄；省略則用後端預設（60）。 */
+  minConfidence?: number
+  /** 已有文字層的頁面預設會跳過；設 true 強制重新辨識全部頁面。 */
+  force?: boolean
+  /** 可選；省略則後端預設為 ocr_<原檔名>。 */
+  filename?: string
+}
+
+export interface OcrStats {
+  pages_processed: number
+  pages_skipped_existing_text: number
+  words_added: number
+  words_skipped_low_confidence: number
+  words_skipped_no_font: number
+  pages_truncated: number
+}
+
+export interface OcrResult {
+  document: DocMeta
+  stats: OcrStats
+}
+
+export interface OcrLanguage {
+  code: string
+  label: string
+}
+
+/** 目前伺服器 tessdata 目錄下實際可用的語言——清單隨環境增減，不寫死。 */
+export async function fetchOcrLanguages(): Promise<OcrLanguage[]> {
+  const res = await fetch('/api/ocr/languages')
+  return jsonOrThrow(res)
+}
+
+/** 啟動 OCR 背景 job，立刻回傳 job_id；進度用 pollOcrJob 輪詢。 */
+export async function startOcrJob(id: string, opts: OcrOptions): Promise<{ job_id: string }> {
+  const body: Record<string, unknown> = {}
+  if (opts.langs !== undefined) body.langs = opts.langs
+  if (opts.dpi !== undefined) body.dpi = opts.dpi
+  if (opts.minConfidence !== undefined) body.min_confidence = opts.minConfidence
+  if (opts.force !== undefined) body.force = opts.force
+  if (opts.filename !== undefined) body.filename = opts.filename
+
+  const res = await fetch(`/api/documents/${id}/ocr`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return jsonOrThrow(res)
+}
+
+export type OcrJobStatus =
+  | { status: 'running'; pages_done: number; pages_total: number }
+  | ({ status: 'done' } & OcrResult)
+  | { status: 'error'; message: string }
+
+export async function pollOcrJob(id: string, jobId: string): Promise<OcrJobStatus> {
+  const res = await fetch(`/api/documents/${id}/ocr/jobs/${jobId}`)
+  return jsonOrThrow(res)
+}
+
+// ---------- 區域密文／光柵化（Phase 12）----------
+
+/** 一個待套用的密文方框：頁面 index + points（top-left origin，同註解慣例）。 */
+export interface RedactBox {
+  page: number
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+export interface RedactOptions {
+  /** 光柵化 DPI，範圍 36–600；省略則用後端預設（300）。 */
+  dpi?: number
+  /** JPEG 品質 10–100；省略則用後端預設（90）。 */
+  jpegQuality?: number
+  /** 可選；省略則後端預設為 redacted_<原檔名>。 */
+  filename?: string
+}
+
+export interface RedactStats {
+  pages_rasterized: number
+  boxes_burned: number
+  objects_pruned: number
+  struct_elements_removed: number
+}
+
+export interface RedactResult {
+  document: DocMeta
+  stats: RedactStats
+}
+
+/** 套用密文成功後，伺服器會刪除套用前的原始文件（見後端 P12 review）——
+ *  回傳的新文件是唯一保留下來的版本。 */
+export async function redactDocument(
+  id: string,
+  boxes: RedactBox[],
+  opts: RedactOptions = {},
+): Promise<RedactResult> {
+  const body: Record<string, unknown> = { boxes }
+  if (opts.dpi !== undefined) body.dpi = opts.dpi
+  if (opts.jpegQuality !== undefined) body.jpeg_quality = opts.jpegQuality
+  if (opts.filename !== undefined) body.filename = opts.filename
+
+  const res = await fetch(`/api/documents/${id}/redact`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -844,4 +1026,312 @@ export async function compareDocuments(
     body: JSON.stringify(body),
   })
   return jsonOrThrow(res)
+}
+
+// ---- 桌面本機模式（ADR-002/003/004）----
+// `/api/local/*` 只掛在桌面內嵌 axum；web 版一律 404。mode 用 ping 一次
+// 偵測結果快取，同一次頁面生命週期不重打。
+
+export type AppMode = 'web' | 'local'
+
+let modePromise: Promise<AppMode> | null = null
+
+/** 偵測執行環境：local build 下 `/api/local/ping` 回 200，web 版 404/網路錯誤都視為 web。 */
+export function detectMode(): Promise<AppMode> {
+  if (!modePromise) {
+    modePromise = fetch('/api/local/ping')
+      .then((res): AppMode => (res.ok ? 'local' : 'web'))
+      .catch((): AppMode => 'web')
+  }
+  return modePromise
+}
+
+/** 409：存檔時發現原檔在磁碟上已被外部程式改過（mtime 不符）。前端應提示使用者是否強制覆寫。 */
+export class SaveConflictError extends Error {}
+
+/** 人操作開檔：跳系統開檔對話框。使用者取消回 null。 */
+export async function openDialog(): Promise<DocMeta | null> {
+  const res = await fetch('/api/local/open-dialog', { method: 'POST' })
+  if (res.status === 204) return null
+  return jsonOrThrow(res)
+}
+
+/** 已知路徑直接開（檔案關聯/拖放進視窗給的真實路徑）。 */
+export async function openByPath(path: string): Promise<DocMeta> {
+  const res = await fetch('/api/local/open', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  })
+  return jsonOrThrow(res)
+}
+
+/** Ctrl+S：寫回原檔（atomic write-temp-then-rename）。外部改過原檔且 force 為 false 時丟 SaveConflictError。 */
+export async function saveDoc(id: string, force = false): Promise<DocMeta> {
+  const res = await fetch(`/api/local/documents/${id}/save`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ force }),
+  })
+  if (res.status === 409) {
+    const body = await res.json().catch(() => ({ error: '原檔已被其他程式修改' }))
+    throw new SaveConflictError(body.error ?? '原檔已被其他程式修改')
+  }
+  return jsonOrThrow(res)
+}
+
+/** 另存新檔：跳系統另存對話框。使用者取消回 null。 */
+export async function saveAsDialog(id: string): Promise<DocMeta | null> {
+  const res = await fetch(`/api/local/documents/${id}/save-as-dialog`, { method: 'POST' })
+  if (res.status === 204) return null
+  return jsonOrThrow(res)
+}
+
+/** 另存新檔：已知路徑（測試/自動化入口）。 */
+export async function saveAsPath(id: string, path: string): Promise<DocMeta> {
+  const res = await fetch(`/api/local/documents/${id}/save-as`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  })
+  return jsonOrThrow(res)
+}
+
+/** POST /api/local/print 的請求體（見 desktop/src/local_api.rs::PrintReq）。 */
+export interface PrintOptions {
+  /** 0-based 頁碼；省略或空陣列＝整份。 */
+  pages?: number[]
+  /** 是否連註解一起印；省略時後端預設 true（同 Acrobat 的「文件和標記」）。 */
+  annotations?: boolean
+  /** 指定印表機＝不跳系統列印對話框；給自動化/測試用，UI 一律留空讓使用者自己選印表機。 */
+  printer?: string
+  /** 搭配 printer 使用；UI 一律留空。 */
+  output?: string
+}
+
+/** 系統列印（Windows GDI，見 desktop/src/print.rs）。只有桌面版有這支端點，網頁版走
+ *  window.print()。回傳實際送出的頁數；0 代表使用者在系統列印對話框按了取消——不是錯誤。 */
+export async function printLocal(id: string, opts: PrintOptions = {}): Promise<{ printed: number }> {
+  const body: Record<string, unknown> = { docId: id }
+  if (opts.pages !== undefined) body.pages = opts.pages
+  if (opts.annotations !== undefined) body.annotations = opts.annotations
+  if (opts.printer !== undefined) body.printer = opts.printer
+  if (opts.output !== undefined) body.output = opts.output
+
+  const res = await fetch('/api/local/print', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return jsonOrThrow(res)
+}
+
+/** dirty = revision != saved_revision，後端直接讀記憶體 meta，不經 PDFium，隨便問都不貴。 */
+export async function checkDirty(id: string): Promise<boolean> {
+  const res = await fetch(`/api/local/documents/${id}/dirty`)
+  const body = await jsonOrThrow<{ dirty: boolean }>(res)
+  return body.dirty
+}
+
+/** 關窗攔截確認流程最後一步：使用者已經決定（存檔後關／捨棄後關），真的關窗。 */
+export async function requestClose(): Promise<void> {
+  const res = await fetch('/api/local/close', { method: 'POST' })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: '關閉視窗失敗' }))
+    throw new Error(body.error ?? '關閉視窗失敗')
+  }
+}
+
+/** 全螢幕（F11／工具列按鈕）：桌面版讓 Rust 端真的把 `"main"` 視窗切全螢幕；
+ *  web 版走瀏覽器原生 Fullscreen API（見 App.tsx），不經此端點。 */
+export async function setLocalFullscreen(fullscreen: boolean): Promise<void> {
+  const res = await fetch('/api/local/fullscreen', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fullscreen }),
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: '切換全螢幕失敗' }))
+    throw new Error(body.error ?? '切換全螢幕失敗')
+  }
+}
+
+/**
+ * `desktop/src/recent.rs` 的 `ClientEntry` 沒有 `#[serde(rename_all)]`，
+ * wire 上是 snake_case（`last_opened`／`thumb_key`），跟本檔其餘 camelCase
+ * 端點不同——同樣的不一致在上面 StepSecrets／RunActionRequest 也有一份
+ * 註解。這裡照抄後端實際欄位名，不要「順手」改成 camelCase，改了會跟
+ * 後端對不起來，靜靜地拿到 undefined。
+ */
+export interface RecentEntry {
+  path: string
+  filename: string
+  last_opened: string
+  starred: boolean
+  exists: boolean
+  size: number | null
+  thumb_key: string | null
+}
+
+/** 最近使用清單，已依 last_opened 新到舊排序（星號分組是前端的事）。 */
+export async function listRecent(): Promise<RecentEntry[]> {
+  const res = await fetch('/api/local/recent')
+  const body = await jsonOrThrow<{ entries: RecentEntry[] }>(res)
+  return body.entries
+}
+
+/**
+ * 404＝這筆項目已經不在清單裡（例如另一個視窗剛好清過／移除過）。這種
+ * 「清單過期」跟真正的失敗（伺服器掛了、連不上）該分開處理：前者只要重抓
+ * 清單就對了，後者要讓使用者看見。用獨立的錯誤類別區分，同 SaveConflictError
+ * 的作法——丟通用 Error 的話狀態碼就沒了，呼叫端只能一律吞掉，連真故障
+ * 也一起靜音。
+ */
+export class RecentEntryGoneError extends Error {}
+
+async function recentMutate(url: string, body: unknown, fallbackMsg: string): Promise<void> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (res.ok) return
+  const payload = await res.json().catch(() => ({ error: fallbackMsg }))
+  const msg = payload.error ?? fallbackMsg
+  throw res.status === 404 ? new RecentEntryGoneError(msg) : new Error(msg)
+}
+
+export async function setRecentStarred(path: string, starred: boolean): Promise<void> {
+  return recentMutate('/api/local/recent/star', { path, starred }, '設定星號失敗')
+}
+
+export async function removeRecent(path: string): Promise<void> {
+  return recentMutate('/api/local/recent/remove', { path }, '移除項目失敗')
+}
+
+/** 只清未加星號的項目；加星號的原地不動（後端行為，見 recent.rs）。 */
+export async function clearRecent(): Promise<void> {
+  const res = await fetch('/api/local/recent/clear', { method: 'POST' })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: '清除清單失敗' }))
+    throw new Error(body.error ?? '清除清單失敗')
+  }
+}
+
+/** 縮圖 URL 建構（給 `<img src>` 用，不是 fetch）。key 後端已限制 16 hex 字元，這裡仍 encode 以防萬一。 */
+export function recentThumbUrl(key: string): string {
+  return `/api/local/recent/thumb/${encodeURIComponent(key)}`
+}
+
+// ---------- 動作精靈（Action Wizard, P17）----------
+//
+// 每個 Step 的欄位形狀刻意對齊對應單發 endpoint 的 request body（見後端
+// server/src/actions.rs 註解），方便共用同一套參數表單。唯一例外是
+// StepSecrets／RunActionRequest.stepSecrets：後端該兩個 struct 沒有
+// #[serde(rename_all)]，wire 上是 snake_case（owner_password／
+// user_password／document_ids／step_secrets），跟其餘 camelCase 的單發
+// endpoint（如 protectDocument 的 ownerPassword）不同，這裡照抄後端實際欄位名。
+
+export interface StepRedactBox {
+  page: number
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+export type Step =
+  | { type: 'rotateAll'; delta: number }
+  | { type: 'crop'; pages: number[]; rect?: Rect }
+  | { type: 'resize'; pages: number[]; width: number; height: number; mode: ResizeMode }
+  | { type: 'compress'; preset: CompressPreset; dpi?: number; quality?: number }
+  | { type: 'protect'; permissions: PermissionFlags }
+  | { type: 'encrypt'; permissions?: PermissionFlags }
+  | { type: 'ocr'; langs?: string; dpi?: number; min_confidence?: number; force?: boolean }
+  | { type: 'redact'; boxes: StepRedactBox[]; dpi?: number; jpeg_quality?: number }
+  | { type: 'export'; format: ExportFormat; dpi?: number; quality?: number }
+
+export interface ActionDef {
+  id: string
+  name: string
+  steps: Step[]
+}
+
+/** Run-time-only 密碼，只在 runAction 這次請求帶入，從不隨 ActionDef 存檔。 */
+export interface StepSecrets {
+  owner_password?: string
+  user_password?: string
+}
+
+export async function createAction(name: string, steps: Step[]): Promise<ActionDef> {
+  const res = await fetch('/api/actions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, steps }),
+  })
+  return jsonOrThrow(res)
+}
+
+export async function listActions(): Promise<ActionDef[]> {
+  const res = await fetch('/api/actions')
+  return jsonOrThrow(res)
+}
+
+export async function getAction(id: string): Promise<ActionDef> {
+  const res = await fetch(`/api/actions/${id}`)
+  return jsonOrThrow(res)
+}
+
+export async function deleteAction(id: string): Promise<{ ok: boolean }> {
+  const res = await fetch(`/api/actions/${id}`, { method: 'DELETE' })
+  return jsonOrThrow(res)
+}
+
+export interface RunActionRequest {
+  documentIds: string[]
+  /** 只有 Protect/Encrypt 這類 step 才需要，鍵是 steps 陣列的 index。 */
+  stepSecrets?: Record<number, StepSecrets>
+}
+
+export async function runAction(actionId: string, req: RunActionRequest): Promise<{ run_id: string }> {
+  const body: Record<string, unknown> = { document_ids: req.documentIds }
+  if (req.stepSecrets !== undefined) body.step_secrets = req.stepSecrets
+
+  const res = await fetch(`/api/actions/${actionId}/run`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return jsonOrThrow(res)
+}
+
+export type ActionRunFileResult =
+  | { outcome: 'document'; source_document_id: string; document: DocMeta }
+  | {
+      outcome: 'exported'
+      source_document_id: string
+      index: number
+      filename: string
+      content_type: string
+      size: number
+    }
+  | { outcome: 'failed'; source_document_id: string; step_index: number; message: string }
+
+export type ActionRunStatus =
+  | { status: 'running'; current_file: number; total_files: number; current_step: number; total_steps: number }
+  | { status: 'done'; results: ActionRunFileResult[] }
+
+export async function pollActionRun(runId: string): Promise<ActionRunStatus> {
+  const res = await fetch(`/api/actions/runs/${runId}`)
+  return jsonOrThrow(res)
+}
+
+/** 下載單一 Exported 結果（index 為 pollActionRun 回傳 results 裡該筆的 index 欄位）。 */
+export function actionRunFileUrl(runId: string, index: number): string {
+  return `/api/actions/runs/${runId}/files/${index}`
+}
+
+/** 打包整批 Exported 結果成 zip；action 沒有 Export step（或全部失敗）時後端回 400。 */
+export function actionRunDownloadUrl(runId: string): string {
+  return `/api/actions/runs/${runId}/download`
 }

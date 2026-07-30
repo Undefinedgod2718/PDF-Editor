@@ -89,7 +89,59 @@
         <Property Id="SETDEFAULTPDF" Secure="yes" />
         <!-- Default checked only in full interactive UI; an unchecked value stays absent. -->
         <SetProperty Id="SETDEFAULTPDF" Value="1" Before="CostFinalize" Sequence="ui">NOT Installed AND UILevel=5 AND NOT SETDEFAULTPDF</SetProperty>
+        <!-- MCP auto-registration (installer asks on McpSetupDlg) -->
+        <Property Id="MCPSETUP" Secure="yes" />
+        <SetProperty Id="MCPSETUP" Value="1" Before="CostFinalize" Sequence="ui">NOT Installed AND UILevel=5 AND NOT MCPSETUP</SetProperty>
         <CustomAction Id="LaunchApplication" Impersonate="yes" FileKey="Path" ExeCommand="[LAUNCHAPPARGS]" Return="asyncNoWait" />
+        <!-- Ticking "set as default PDF app" cannot actually make us the default:
+             HKCU\...\Explorer\FileExts\.pdf\UserChoice wins and its hash is only
+             writable by the OS on a real user gesture. What the installer CAN do is
+             register Application Capabilities (fragments/default-pdf.wxs) and then
+             drop the user on our own page in Settings, one click from switching.
+             `explorer.exe <uri>` because msiexec cannot ShellExecute a URI itself;
+             explorer resolves off %SystemRoot% in PATH. The space in the product
+             name must be percent-encoded or Settings ignores the query. -->
+        <CustomAction
+            Id="OpenDefaultAppsSettings"
+            Directory="INSTALLDIR"
+            Impersonate="yes"
+            Return="asyncNoWait"
+            ExeCommand="explorer.exe &quot;ms-settings:defaultapps?registeredAppUser=PDF%20Editor&quot;" />
+        <!-- Impersonate: HKCU (`claude mcp add`'s own config) and %USERPROFILE%\.cursor
+             need to land in the installing user's profile, not SYSTEM's (deferred CAs
+             run as SYSTEM by default). Return="ignore": a missing claude CLI or an
+             unwritable Cursor config must never fail the MSI install.
+
+             "[INSTALLDIR]." — the trailing dot is load-bearing. [INSTALLDIR] already
+             ends in a backslash, so the old "[INSTALLDIR]\\" produced three backslashes
+             before the closing quote; CommandLineToArgvW reads an odd run of backslashes
+             as escaping the quote, so PowerShell received -InstallDir with a literal `"`
+             glued on the end. Every install then looked for
+             `D:\Program Files\PDF Editor\"\pdf-editor-mcp-server.exe`, failed the
+             Test-Path, and exited 0 — silently registering nothing. Confirmed from
+             %TEMP%\pdf-editor-mcp-register.log after two real installs. A dot keeps the
+             path valid, keeps the quote unescaped, and Join-Path handles it fine. -->
+        <CustomAction
+            Id="RegisterMcp"
+            Directory="INSTALLDIR"
+            Execute="deferred"
+            Impersonate="yes"
+            Return="ignore"
+            ExeCommand="powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle hidden -File .\register-mcp.ps1 -InstallDir &quot;[INSTALLDIR].&quot;" />
+        <!-- Counterpart removal on uninstall. Same impersonate/ignore rules as
+             RegisterMcp. Scheduled Before RemoveFiles (see the sequence below):
+             the .ps1 lives in INSTALLDIR, and a deferred CA "Before InstallFinalize"
+             would execute AFTER RemoveFiles had already deleted it. Not gated on
+             MCPSETUP (a UI-only property, not persisted to the installed product)
+             so it also cleans up a manual registration; removing an absent entry
+             is a harmless no-op. -->
+        <CustomAction
+            Id="DeleteMcp"
+            Directory="INSTALLDIR"
+            Execute="deferred"
+            Impersonate="yes"
+            Return="ignore"
+            ExeCommand="powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle hidden -File .\unregister-mcp.ps1 -InstallDir &quot;[INSTALLDIR].&quot;" />
 
         <!--
           Copy of WiX v3 WixUI_InstallDir's dialog set with DefaultPdfDlg
@@ -98,9 +150,30 @@
           both events would be linked and the custom page could be skipped.
         -->
         <UI>
-            <TextStyle Id="WixUI_Font_Normal" FaceName="Tahoma" Size="8" />
-            <TextStyle Id="WixUI_Font_Bigger" FaceName="Tahoma" Size="12" />
-            <TextStyle Id="WixUI_Font_Title" FaceName="Tahoma" Size="9" Bold="yes" />
+            <!-- Consolas: 農場/草地風格文字要求的落地版——WiX 原生對話框字型只能
+                 指定「目標機器已安裝」的字型名，無法像網頁那樣內嵌任意像素字型
+                 檔（需另外寫 Font 安裝 custom action，複雜且脆弱）。Consolas 是
+                 Windows Vista+ 內建、最接近「方塊感」的等寬字，不用額外安裝
+                 （Consolas 無 CJK 字符，中文會 fallback 回系統細明體——已知，非本次範圍）。
+
+                 顏色按實際背景拆，不能全白：Normal 是 DefaultUIFont，套用在
+                 InstallDirDlg/VerifyReadyDlg/我們自訂的 DefaultPdfDlg/McpSetupDlg
+                 這些「banner 底下是系統淺色對話框底」的頁面內文，白字在那上面
+                 幾乎看不見，改黑。Title/Bigger 只用在深色背景（banner 色塊、
+                 WelcomeDlg/ExitDialog 滿版草地圖）上，維持白字。
+
+                 陷阱：stock WixUI banner 對話框（InstallDirDlg/VerifyReadyDlg/
+                 LicenseAgreementDlg/MaintenanceTypeDlg）的 Description 控制項也坐在
+                 頂端 44px 深色 banner 上，但它用 DefaultUIFont(=Normal=黑)，於是黑字
+                 疊在深色 banner 上一樣看不清。Title 因為 loc 字串已內嵌 {\WixUI_Font_Title}
+                 白字才 OK。修法：另建一個同 Normal 大小的白字型 WixUI_Font_Normal_White，
+                 在 zh-TW.wxl 用 {\WixUI_Font_Normal_White} 前綴覆寫那 4 個 Description
+                 字串——不能直接把 Normal 改白，否則所有 stock 對話框「淺色底」的內文全變
+                 白字（那些比 banner Description 多得多）會反而看不見。 -->
+            <TextStyle Id="WixUI_Font_Normal" FaceName="Consolas" Size="8" Bold="yes" Red="0" Green="0" Blue="0" />
+            <TextStyle Id="WixUI_Font_Normal_White" FaceName="Consolas" Size="8" Bold="yes" Red="255" Green="255" Blue="255" />
+            <TextStyle Id="WixUI_Font_Bigger" FaceName="Consolas" Size="12" Bold="yes" Red="255" Green="255" Blue="255" />
+            <TextStyle Id="WixUI_Font_Title" FaceName="Consolas" Size="9" Bold="yes" Red="255" Green="255" Blue="255" />
 
             <Property Id="DefaultUIFont" Value="WixUI_Font_Normal" />
             <Property Id="WixUI_Mode" Value="InstallDir" />
@@ -131,10 +204,29 @@
                 <Control Id="DefaultPdfNote" Type="Text" X="25" Y="120" Width="320" Height="40" Transparent="yes" NoPrefix="yes" Text="!(loc.DefaultPdfDlg_Note)" />
             </Dialog>
 
+            <Dialog Id="McpSetupDlg" Width="370" Height="270" Title="!(loc.McpSetupDlg_Title)">
+                <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)" />
+                <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)" />
+                <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+                    <Publish Event="SpawnDialog" Value="CancelDlg">1</Publish>
+                </Control>
+                <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="!(loc.DefaultPdfDlg_BannerBitmap)" />
+                <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+                <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+                <Control Id="Description" Type="Text" X="25" Y="55" Width="320" Height="30" Transparent="yes" NoPrefix="yes" Text="!(loc.McpSetupDlg_Description)" />
+                <Control Id="McpSetupCheckbox" Type="CheckBox" X="25" Y="95" Width="320" Height="17" Property="MCPSETUP" CheckBoxValue="1" Text="!(loc.McpSetupCheckboxLabel)" />
+                <Control Id="McpSetupNote" Type="Text" X="25" Y="120" Width="320" Height="60" Transparent="yes" NoPrefix="yes" Text="!(loc.McpSetupDlg_Note)" />
+            </Dialog>
+
             <Publish Dialog="BrowseDlg" Control="OK" Event="DoAction" Value="WixUIValidatePath" Order="3">1</Publish>
             <Publish Dialog="BrowseDlg" Control="OK" Event="SpawnDialog" Value="InvalidDirDlg" Order="4"><![CDATA[NOT WIXUI_DONTVALIDATEPATH AND WIXUI_INSTALLDIR_VALID<>"1"]]></Publish>
 
             <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchApplication">WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed</Publish>
+            <!-- Order 998: after LaunchApplication so the Settings window, not the app,
+                 is the one left in front — it is the thing the user still has to act on.
+                 Fired from the UI sequence (never in a silent install) and only when the
+                 user actually asked to be the default. -->
+            <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="OpenDefaultAppsSettings" Order="998">SETDEFAULTPDF = "1" AND NOT Installed</Publish>
             <Publish Dialog="ExitDialog" Control="Finish" Event="EndDialog" Value="Return" Order="999">1</Publish>
 
             {{#if license}}
@@ -156,9 +248,12 @@
             <Publish Dialog="InstallDirDlg" Control="ChangeFolder" Event="SpawnDialog" Value="BrowseDlg" Order="2">1</Publish>
 
             <Publish Dialog="DefaultPdfDlg" Control="Back" Event="NewDialog" Value="InstallDirDlg">1</Publish>
-            <Publish Dialog="DefaultPdfDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg">1</Publish>
+            <Publish Dialog="DefaultPdfDlg" Control="Next" Event="NewDialog" Value="McpSetupDlg">1</Publish>
 
-            <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="DefaultPdfDlg" Order="1">NOT Installed</Publish>
+            <Publish Dialog="McpSetupDlg" Control="Back" Event="NewDialog" Value="DefaultPdfDlg">1</Publish>
+            <Publish Dialog="McpSetupDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg">1</Publish>
+
+            <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="McpSetupDlg" Order="1">NOT Installed</Publish>
             <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="MaintenanceTypeDlg" Order="2">Installed AND NOT PATCH</Publish>
             <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="2">Installed AND PATCH</Publish>
 
@@ -456,6 +551,15 @@
 
         <InstallExecuteSequence>
           <Custom Action="LaunchApplication" After="InstallFinalize">AUTOLAUNCHAPP AND NOT Installed</Custom>
+        </InstallExecuteSequence>
+
+        <InstallExecuteSequence>
+          <Custom Action="RegisterMcp" Before="InstallFinalize">MCPSETUP AND NOT REMOVE</Custom>
+          <!-- Full uninstall only (REMOVE="ALL"); skipped during a major upgrade
+               (UPGRADINGPRODUCTCODE set) so we don't tear down the registration the
+               new build's RegisterMcp is about to refresh. Before RemoveFiles so
+               unregister-mcp.ps1 still exists when the CA runs. -->
+          <Custom Action="DeleteMcp" Before="RemoveFiles">(REMOVE = "ALL") AND NOT UPGRADINGPRODUCTCODE</Custom>
         </InstallExecuteSequence>
 
         <SetProperty Id="ARPINSTALLLOCATION" Value="[INSTALLDIR]" After="CostFinalize"/>

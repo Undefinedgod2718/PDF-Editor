@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { deletePage, insertPage, reorderPages, rotatePage, renderUrl, type DocInfo } from '../api'
-import { MergeDialog, ExtractDialog } from './PageDialogs'
 import ResizeDialog from './ResizeDialog'
 import InsertFromDialog from './InsertFromDialog'
 
@@ -10,7 +9,10 @@ interface Props {
   gotoPage: (p: number) => void
   pageVersions: Record<number, number>
   onStructureChanged: () => void | Promise<void>
-  onOpenDoc: (id: string) => void | Promise<void>
+  /** 合併/擷取對話框的開關狀態提升到 DocumentWorkspace（activeDialog），這裡只負責觸發開啟——
+   *  頂部工具列的「編輯」頁籤有等效按鈕，兩條路必須共用同一份對話框狀態。 */
+  onMerge: () => void
+  onExtract: () => void
 }
 
 const THUMB_SCALE = 0.25
@@ -21,13 +23,12 @@ export default function ThumbnailPanel({
   gotoPage,
   pageVersions,
   onStructureChanged,
-  onOpenDoc,
+  onMerge,
+  onExtract,
 }: Props) {
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const [overIndex, setOverIndex] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
-  const [showMerge, setShowMerge] = useState(false)
-  const [showExtract, setShowExtract] = useState(false)
   const [showResize, setShowResize] = useState(false)
   const [showInsertFrom, setShowInsertFrom] = useState(false)
 
@@ -141,10 +142,10 @@ export default function ThumbnailPanel({
         ))}
       </div>
       <div className="thumb-panel-actions">
-        <button className="tb-btn" onClick={() => setShowMerge(true)}>
+        <button className="tb-btn" onClick={onMerge}>
           合併文件
         </button>
-        <button className="tb-btn" onClick={() => setShowExtract(true)}>
+        <button className="tb-btn" onClick={onExtract}>
           擷取頁面
         </button>
         <button className="tb-btn" onClick={() => setShowResize(true)}>
@@ -168,27 +169,6 @@ export default function ThumbnailPanel({
           doc={doc}
           onClose={() => setShowInsertFrom(false)}
           onApplied={onStructureChanged}
-        />
-      )}
-
-      {showMerge && (
-        <MergeDialog
-          doc={doc}
-          onClose={() => setShowMerge(false)}
-          onOpenDoc={async (id) => {
-            setShowMerge(false)
-            await onOpenDoc(id)
-          }}
-        />
-      )}
-      {showExtract && (
-        <ExtractDialog
-          doc={doc}
-          onClose={() => setShowExtract(false)}
-          onOpenDoc={async (id) => {
-            setShowExtract(false)
-            await onOpenDoc(id)
-          }}
         />
       )}
     </div>

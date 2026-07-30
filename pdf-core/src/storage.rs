@@ -234,6 +234,18 @@ impl Storage {
         self.docs.iter().map(|m| m.clone()).collect()
     }
 
+    /// Remove a document's working copy (`{id}.pdf` + sidecar) and its
+    /// metadata entry. Never touches `origin` (a desktop path-session's
+    /// external source file) — only the storage-root copy is deleted.
+    pub fn delete(&self, id: Uuid) -> anyhow::Result<()> {
+        self.docs
+            .remove(&id)
+            .ok_or_else(|| anyhow::anyhow!("document not found"))?;
+        let _ = std::fs::remove_file(self.pdf_path(id));
+        let _ = std::fs::remove_file(self.meta_path(id));
+        Ok(())
+    }
+
     // ---- stamps ----
 
     pub fn stamp_path(&self, id: Uuid) -> PathBuf {
@@ -393,6 +405,20 @@ mod tests {
         assert_eq!(std::fs::read(&dest).unwrap(), b"%PDF-a");
         // 原檔不動
         assert_eq!(std::fs::read(&origin).unwrap(), b"%PDF-a");
+    }
+
+    #[test]
+    fn delete_removes_working_copy_and_metadata() {
+        let dir = tmpdir("delete");
+        let storage = Storage::new(dir.join("data")).unwrap();
+        let meta = storage.save("x.pdf".into(), b"%PDF-x", None).unwrap();
+        assert!(storage.pdf_path(meta.id).exists());
+
+        storage.delete(meta.id).unwrap();
+        assert!(storage.get(meta.id).is_none());
+        assert!(!storage.pdf_path(meta.id).exists());
+        assert!(!storage.meta_path(meta.id).exists());
+        assert!(storage.delete(meta.id).is_err(), "deleting twice should error, not panic");
     }
 
     #[test]

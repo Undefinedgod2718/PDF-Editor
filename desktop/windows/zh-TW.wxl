@@ -3,6 +3,32 @@
   <String Id="DefaultPdfDlg_Title">PDF 檔案關聯</String>
   <String Id="DefaultPdfDlg_Description">選擇是否將 PDF Editor 設為開啟 PDF 的預設程式。</String>
   <String Id="DefaultPdfCheckboxLabel">將 PDF Editor 設為預設 PDF 開啟程式</String>
-  <String Id="DefaultPdfDlg_Note">即使設為預設，Windows 仍可能要求您在「設定 &gt; 預設應用程式」中確認一次。</String>
+  <!-- 文案照 Windows 實情寫：安裝程式改不了預設程式（.pdf 的 UserChoice 有雜湊保護，
+       只認使用者在系統 UI 的手動操作），能做的是把 App 註冊成候選、再把使用者帶到
+       設定頁。不要寫成「已幫您設好」——那是騙人的。見 fragments\default-pdf.wxs。 -->
+  <String Id="DefaultPdfDlg_Note">Windows 不允許安裝程式直接搶走預設程式。勾選後，安裝完成時會自動開啟「設定 &gt; 預設應用程式」的 PDF Editor 頁面，您在那裡按一下即可完成切換。</String>
   <String Id="DefaultPdfDlg_BannerBitmap">WixUI_Bmp_Banner</String>
+  <String Id="McpSetupDlg_Title">MCP 工具設定</String>
+  <String Id="McpSetupDlg_Description">是否要在安裝完成後，自動幫本機的 Claude Code CLI／Cursor 註冊這款 App 的 MCP server？</String>
+  <String Id="McpSetupCheckboxLabel">自動註冊 MCP server（找不到 Claude CLI／Cursor 設定檔時會靜默略過）</String>
+  <String Id="McpSetupDlg_Note">Claude Code：執行 `claude mcp add`。Cursor：合併寫入使用者的 mcp.json（不會覆蓋你既有的其他 MCP 設定）。之後也可以自己手動註冊，不影響其他功能。</String>
+
+  <!-- 覆寫 WixUIExtension 的 stock Description 字串（其原始定義 Overridable="yes"，
+       此處無 Overridable 的版本會勝出），前綴白字型讓深色 banner 上的說明看得清。
+       見 main.wxs TextStyle 註解。文字沿用 WiX 標準 zh-TW 翻譯。 -->
+  <String Id="InstallDirDlgDescription">{\WixUI_Font_Normal_White}按一下「下一步」安裝到預設資料夾，或按一下「變更」來選擇其他資料夾。</String>
+  <String Id="LicenseAgreementDlgDescription">{\WixUI_Font_Normal_White}請仔細閱讀下列授權合約。</String>
+  <String Id="MaintenanceTypeDlgDescription">{\WixUI_Font_Normal_White}選取您要執行的維護作業。</String>
+  <!-- WelcomeDlg／ExitDialog／MaintenanceWelcomeDlg 是滿版 WixUIDialogBmp（深色泥土圖），
+       它們的 Title 因為 stock 字串自帶 {\WixUI_Font_Bigger} 前綴才是白的，Description
+       沒有前綴 → 吃 DefaultUIFont（黑）→ 黑字壓在深色圖上等於看不見。 -->
+  <String Id="WelcomeDlgDescription">{\WixUI_Font_Normal_White}安裝精靈將在您的電腦上安裝 [ProductName]。請按一下「下一步」繼續，或按一下「取消」結束安裝精靈。</String>
+  <String Id="ExitDialogDescription">{\WixUI_Font_Normal_White}按一下「完成」結束安裝精靈。</String>
+  <String Id="MaintenanceWelcomeDlgDescription">{\WixUI_Font_Normal_White}安裝精靈可以讓您變更 [ProductName] 安裝在電腦上的方式，或從電腦移除。請按一下「下一步」繼續，或按一下「取消」結束安裝精靈。</String>
+  <!-- 這裡曾經有一條 VerifyReadyDlgDescription。它從來沒有生效過：WixUIExtension v3.14
+       根本沒有這個字串 id（實際比對過 WixTools314\WixUIExtension.dll 內嵌的 zh-tw
+       WixLocalization 區塊）。VerifyReadyDlg 的說明文字依安裝模式拆成五條
+       VerifyReadyDlg{Install,Change,Repair,Remove,Update}Text，且它們是 body 文字不是
+       banner 文字，底色未確認 —— 貿然改白字可能反而在淺色底上消失，故不動，等裝機
+       截圖確認再說。 -->
 </WixLocalization>

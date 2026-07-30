@@ -2,7 +2,10 @@
 PDF conversion sidecar for the PDF Editor's Rust server.
 
 CLI contract:
-    python convert.py --mode docx|xlsx --input <input.pdf> --output <output-file> [--pages 0,2,5]
+    python convert.py --mode docx|xlsx|markdown --input <input.pdf> --output <output-file> [--pages 0,2,5]
+
+    --pages is not accepted for markdown (MarkItDown converts the whole
+    file, no per-page API) — the caller rejects it before reaching here.
 
 On success: writes the output file, prints a single JSON line to stdout:
     {"ok": true, "pages": <number of pages converted>}
@@ -163,26 +166,54 @@ def convert_xlsx(input_path, output_path, pages):
     wb.save(output_path)
 
 
+def convert_markdown(input_path, output_path):
+    """Convert the whole PDF to a single Markdown file via MarkItDown.
+
+    No page subsetting — MarkItDown converts the source file as a whole,
+    there's no per-page API to slice. Scanned pages with no extractable
+    text simply contribute nothing to the output (run OCR first if that
+    matters).
+    """
+    from markitdown import MarkItDown
+
+    try:
+        result = MarkItDown().convert(input_path)
+    except Exception as exc:
+        raise ConvertError(f"markdown conversion failed: {exc}")
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(result.text_content)
+
+
 def run(mode, input_path, output_path, pages_arg):
     if not os.path.isfile(input_path):
         raise ConvertError(f"input file not found: {input_path}")
 
-    if mode not in ("docx", "xlsx"):
-        raise ConvertError(f"invalid mode '{mode}' (expected 'docx' or 'xlsx')")
+    if mode not in ("docx", "xlsx", "markdown"):
+        raise ConvertError(f"invalid mode '{mode}' (expected 'docx', 'xlsx', or 'markdown')")
+
+    if mode == "markdown" and pages_arg is not None:
+        # The Rust caller already rejects this before spawning us; this is
+        # a defensive check for anyone invoking the sidecar directly.
+        raise ConvertError("--pages is not supported for markdown mode")
 
     page_count = open_pdf_for_validation(input_path)
-    pages = parse_pages_arg(pages_arg, page_count)
 
     out_dir = os.path.dirname(os.path.abspath(output_path))
     if out_dir and not os.path.isdir(out_dir):
         raise ConvertError(f"output directory does not exist: {out_dir}")
 
+    if mode == "markdown":
+        convert_markdown(input_path, output_path)
+        return page_count
+
+    pages = parse_pages_arg(pages_arg, page_count)
     if mode == "docx":
         convert_docx(input_path, output_path, pages)
     elif mode == "xlsx":
         convert_xlsx(input_path, output_path, pages)
     else:
-        # unreachable: argparse restricts choices, but keep for safety
+        # unreachable: mode already validated above, kept for safety
         raise ConvertError(f"unknown mode '{mode}'")
 
     return len(pages)

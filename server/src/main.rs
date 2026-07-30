@@ -5,7 +5,7 @@ use axum::extract::DefaultBodyLimit;
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
-use pdf_editor_server::{api, pdf, sidecar, storage, AppState, SharedState};
+use pdf_editor_server::{actions, api, pdf, sidecar, storage, AppState, SharedState};
 
 /// PDF / stamp / image uploads — Axum's default 2 MiB limit rejects typical PDFs
 /// with `Error parsing multipart/form-data request`.
@@ -22,8 +22,15 @@ async fn main() -> anyhow::Result<()> {
     let data_dir = std::env::var("PDF_EDITOR_DATA").unwrap_or_else(|_| "data".into());
     let storage = storage::Storage::new(&data_dir)?;
     let engine = pdf::engine::PdfEngine::spawn()?;
+    let actions_store = actions::ActionStore::new(std::path::Path::new(&data_dir).join("actions"))?;
 
-    let state: SharedState = Arc::new(AppState { storage, engine });
+    let state: SharedState = Arc::new(AppState {
+        storage,
+        engine,
+        ocr_jobs: Default::default(),
+        actions: actions_store,
+        action_runs: Default::default(),
+    });
 
     // Boot-time detection: a missing sidecar otherwise only surfaces as a 500
     // on the first docx/xlsx export. ERROR level so log watchers catch it.

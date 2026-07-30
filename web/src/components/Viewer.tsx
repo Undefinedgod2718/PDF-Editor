@@ -5,11 +5,12 @@ import {
   useImperativeHandle,
   useRef,
 } from 'react'
-import { fetchPageText, renderUrl, type CharBox, type Color, type DocInfo, type FormField, type ImageInfo, type Rect, type SearchHit, type StampMeta } from '../api'
+import { fetchPageText, renderUrl, type CharBox, type Color, type DocInfo, type FormField, type ImageInfo, type Rect, type RedactBox, type SearchHit, type StampMeta } from '../api'
 import AnnotLayer from './AnnotLayer'
 import FormLayer from './FormLayer'
 import CropLayer from './CropLayer'
 import ImageLayer from './ImageLayer'
+import RedactLayer from './RedactLayer'
 import FormBuilderLayer from './FormBuilderLayer'
 import TextLineLayer from './TextLineLayer'
 import type { AnnotTool } from './AnnotToolbar'
@@ -63,6 +64,14 @@ interface Props {
   onFormFieldsChanged: () => void
   /** 雙擊既有欄位框，開啟編輯 dialog。 */
   onEditFormField: (field: FormField) => void
+  /** 密文模式是否啟用（Toolbar「密文」按鈕）——可跨頁，每頁都顯示互動層。 */
+  redactMode: boolean
+  /** 所有頁面目前暫存、尚未套用的密文方框。 */
+  redactBoxes: RedactBox[]
+  /** 在某頁拖曳新增一個密文方框（view-space points）。 */
+  onRedactAddBox: (page: number, rectPt: Rect) => void
+  /** 平移（手形）模式是否啟用（Toolbar 按鈕）——拖曳捲動檢視區，停用底下各層互動。 */
+  panMode: boolean
 }
 
 export interface ViewerHandle {
@@ -100,12 +109,43 @@ const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(
     onBuilderCreateRect,
     onFormFieldsChanged,
     onEditFormField,
+    redactMode,
+    redactBoxes,
+    onRedactAddBox,
+    panMode,
   },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null)
   const pageRefs = useRef<(HTMLDivElement | null)[]>([])
   const textCacheRef = useRef<Map<number, CharBox[]>>(new Map())
+  const panState = useRef<{ x: number; y: number; scrollLeft: number; scrollTop: number } | null>(null)
+
+  const onPanPointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      if (!panMode) return
+      const container = containerRef.current
+      if (!container) return
+      container.setPointerCapture(e.pointerId)
+      panState.current = { x: e.clientX, y: e.clientY, scrollLeft: container.scrollLeft, scrollTop: container.scrollTop }
+    },
+    [panMode],
+  )
+  const onPanPointerMove = useCallback((e: React.PointerEvent) => {
+    const container = containerRef.current
+    const start = panState.current
+    if (!container || !start) return
+    container.scrollLeft = start.scrollLeft - (e.clientX - start.x)
+    container.scrollTop = start.scrollTop - (e.clientY - start.y)
+  }, [])
+  const onPanPointerUp = useCallback((e: React.PointerEvent) => {
+    try {
+      containerRef.current?.releasePointerCapture(e.pointerId)
+    } catch {
+      /* pointer capture already released */
+    }
+    panState.current = null
+  }, [])
 
   useEffect(() => {
     textCacheRef.current.clear()
@@ -160,7 +200,14 @@ const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(
   const dpr = Math.min(window.devicePixelRatio || 1, 2)
 
   return (
-    <div className="viewer" ref={containerRef}>
+    <div
+      className={`viewer ${panMode ? 'viewer-panning' : ''}`}
+      ref={containerRef}
+      onPointerDown={onPanPointerDown}
+      onPointerMove={onPanPointerMove}
+      onPointerUp={onPanPointerUp}
+      onPointerCancel={onPanPointerUp}
+    >
       {doc.pages.map((page) => {
         const cssW = page.width * scale
         const cssH = page.height * scale
@@ -258,6 +305,15 @@ const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(
                 insertArmed={insertArmed}
                 insertNaturalPt={insertNaturalPt}
                 onInsertRectChange={onInsertRectChange}
+              />
+            )}
+            {redactMode && (
+              <RedactLayer
+                scale={scale}
+                boxesPt={redactBoxes
+                  .filter((b) => b.page === page.index)
+                  .map((b) => ({ x: b.x, y: b.y, w: b.w, h: b.h }))}
+                onAddBox={(rectPt) => onRedactAddBox(page.index, rectPt)}
               />
             )}
           </div>
