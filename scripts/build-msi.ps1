@@ -40,6 +40,18 @@ foreach ($Lang in @("eng", "chi_tra")) {
     }
 }
 
+# Bundled into the MSI via desktop/tauri.conf.json resources.
+Write-Host "==> cargo build --release (mcp-server -> target-mcp/)"
+$env:CARGO_TARGET_DIR = Join-Path $Root "target-mcp"
+Push-Location mcp-server
+cargo build --release
+if ($LASTEXITCODE -ne 0) { throw "mcp-server build failed with exit code $LASTEXITCODE" }
+Pop-Location
+$McpExe = Join-Path $Root "target-mcp\release\pdf-editor-mcp-server.exe"
+if (-not (Test-Path $McpExe)) {
+    Write-Error "Missing $McpExe after mcp-server release build."
+}
+
 Write-Host "==> cargo tauri build --bundles msi (desktop/)"
 $env:CARGO_TARGET_DIR = Join-Path $Root "desktop\target"
 Push-Location desktop
