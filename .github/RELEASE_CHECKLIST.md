@@ -16,6 +16,23 @@ Local build (Windows only):
 ICE57 rule: HKCU file associations must **not** share a Component with the
 per-machine `Path` exe (`desktop/windows/main.wxs`).
 
+## v0.3.2 — product sync + MSI
+
+1. Verification: `cargo build`, `cargo test`, `npm run build`, MSI smoke install.
+2. Merge release PR to `main`.
+3. Tag and release (CI uploads MSI after the tag build finishes):
+
+```powershell
+git tag -a v0.3.2 -m "v0.3.2 — Windows MSI"
+git push origin v0.3.2
+```
+
+If CI has already produced the MSI artifact, attach manually:
+
+```powershell
+gh release upload v0.3.2 ".\desktop\target\release\bundle\msi\PDF Editor_0.3.2_x64_zh-TW.msi" --clobber
+```
+
 ## v0.3.1 — desktop shell + WiX MSI
 
 1. Verification: `cargo build`, `cargo test`, `npm run build`, MSI smoke install.

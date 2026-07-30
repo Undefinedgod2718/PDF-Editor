@@ -72,7 +72,7 @@ No. This repository is for local and self-hosted use. There is no cloud deploy s
 
 **Where are releases?**
 
-[GitHub Releases](https://github.com/Undefinedgod2718/PDF-Editor/releases). Current desktop line: **v0.3.x**.
+[GitHub Releases](https://github.com/Undefinedgod2718/PDF-Editor/releases). Current desktop line: **v0.3.2**.
 
 ## Development
 
