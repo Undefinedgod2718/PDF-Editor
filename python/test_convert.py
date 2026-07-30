@@ -190,6 +190,45 @@ def main():
             )
             record(name, ok, f"json={j}")
 
+    # --- Case: markdown, whole document ---
+    out_md = os.path.join(TESTOUT, "all.md")
+    rc, out, err = run_convert(["--mode", "markdown", "--input", pdf_path, "--output", out_md])
+    name = "markdown all pages"
+    if rc != 0:
+        record(name, False, f"exit code {rc}, stderr: {err!r}")
+    else:
+        j = parse_json_line(out, "stdout", name)
+        if j is not None:
+            ok = j.get("ok") is True and j.get("pages") == 3 and os.path.isfile(out_md)
+            if ok:
+                with open(out_md, encoding="utf-8") as f:
+                    content = f.read()
+                # page 1 CJK text and page 2's drawn table should both survive.
+                ok = "中文測試" in content and "R0C0" in content
+                detail = f"json={j}, len={len(content)}"
+            else:
+                detail = f"json={j}"
+            record(name, ok, detail)
+
+    # --- Error case: markdown with --pages ---
+    rc, out, err = run_convert(
+        [
+            "--mode",
+            "markdown",
+            "--input",
+            pdf_path,
+            "--output",
+            os.path.join(TESTOUT, "x5.md"),
+            "--pages",
+            "0,1",
+        ]
+    )
+    name = "error: markdown with --pages"
+    j = parse_json_line(err, "stderr", name)
+    if j is not None:
+        ok = rc == 1 and j.get("ok") is False and "markdown" in j.get("error", "").lower()
+        record(name, ok, f"rc={rc}, json={j}")
+
     # --- Error case: bad mode ---
     rc, out, err = run_convert(
         ["--mode", "bogus", "--input", pdf_path, "--output", os.path.join(TESTOUT, "x1.docx")]

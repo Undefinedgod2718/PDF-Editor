@@ -302,6 +302,20 @@ pub fn assert_editable(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Whether `path` needs an open (user) password before PDFium can render it.
+/// `true` only for a real P12 open-password PDF — a P11 empty-user-password
+/// PDF auto-authenticates and is fine to hand to `pdfium.load_pdf_from_*`
+/// unchanged. Any caller that loads a document through PDFium for a
+/// read-only operation (render/search/fingerprint/…) must check this first:
+/// PDFium has no password to try, so a P12 file fails to open and — unless
+/// the caller maps that failure specifically — surfaces as a generic 500
+/// instead of a clean "needs a password" 400 (bit us once already with the
+/// office sidecar's page-count preflight).
+pub fn needs_open_password(path: &Path) -> anyhow::Result<bool> {
+    let probe = Document::load(path)?;
+    Ok(probe.is_encrypted())
+}
+
 /// Read current protection state without a password: permission bits are
 /// always readable without one — either via `EncryptionState` (empty user
 /// password, auto-decrypted by `Document::load`) or straight from the

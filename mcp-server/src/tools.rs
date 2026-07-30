@@ -1,5 +1,5 @@
 //! MCP tool definitions: one `#[tool]` method per wrapped PDF Editor HTTP
-//! endpoint (see wiki/ADR-001-MCP.md §5 for the v1 list). No PDF engine
+//! endpoint. No PDF engine
 //! logic lives here or is linked in — every tool is a thin HTTP forward to
 //! `base_url` (default `http://127.0.0.1:8050`, overridable via the
 //! `PDF_EDITOR_URL` env var read in `main.rs`).
@@ -26,13 +26,16 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{schemars, tool, tool_handler, tool_router, ErrorData as McpError, ServerHandler};
 use serde_json::Value;
 
-/// Timeout for ordinary read/write calls (everything except office export).
+/// Timeout for ordinary read/write calls (everything except heavy / office).
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+/// Timeout for merge / extract / compress / insert / large upload: PDFium
+/// work on multi-hundred-page docs routinely exceeds 30s.
+const HEAVY_TIMEOUT: Duration = Duration::from_secs(180);
 /// Timeout for raster/pptx export: generous headroom over typical render
 /// time for a many-page document.
 const EXPORT_TIMEOUT: Duration = Duration::from_secs(90);
-/// Timeout for docx/xlsx conversion, which runs through the Python sidecar.
-/// The sidecar itself caps a single conversion at 300s (see
+/// Timeout for docx/xlsx/markdown conversion, which runs through the Python
+/// sidecar. The sidecar itself caps a single conversion at 300s (see
 /// `server/src/sidecar.rs`), so this must stay comfortably above that.
 const OFFICE_TIMEOUT: Duration = Duration::from_secs(330);
 
@@ -254,6 +257,15 @@ pub struct ConvertToOfficeArgs {
     pub pages: Vec<u16>,
 }
 
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct ConvertToMarkdownArgs {
+    /// Document id to convert.
+    pub id: String,
+    /// Absolute path to write the converted file to; parent directory must
+    /// already exist.
+    pub output_path: String,
+}
+
 // ---------------------------------------------------------------------
 // HTTP plumbing
 // ---------------------------------------------------------------------
@@ -316,10 +328,19 @@ impl PdfEditorTools {
     }
 
     async fn post_json(&self, path: &str, body: &Value) -> Result<Value, McpError> {
+        self.post_json_timeout(path, body, DEFAULT_TIMEOUT).await
+    }
+
+    async fn post_json_timeout(
+        &self,
+        path: &str,
+        body: &Value,
+        timeout: Duration,
+    ) -> Result<Value, McpError> {
         let req = self
             .client
             .post(self.url(path))
-            .timeout(DEFAULT_TIMEOUT)
+            .timeout(timeout)
             .json(body);
         let resp = self.send(req).await?;
         resp.json::<Value>().await.map_err(|e| self.map_transport_err(e))
@@ -351,7 +372,7 @@ impl PdfEditorTools {
         let req = self
             .client
             .post(self.url(url_path))
-            .timeout(DEFAULT_TIMEOUT)
+            .timeout(HEAVY_TIMEOUT)
             .multipart(form);
         let resp = self.send(req).await?;
         resp.json::<Value>().await.map_err(|e| self.map_transport_err(e))
@@ -555,7 +576,9 @@ impl PdfEditorTools {
         Parameters(MergeDocumentsArgs { ids, filename }): Parameters<MergeDocumentsArgs>,
     ) -> Result<String, McpError> {
         let body = serde_json::json!({ "ids": ids, "filename": filename });
-        let v = self.post_json("/api/documents/merge", &body).await?;
+        let v = self
+            .post_json_timeout("/api/documents/merge", &body, HEAVY_TIMEOUT)
+            .await?;
         Ok(pretty(&v))
     }
 
@@ -568,7 +591,11 @@ impl PdfEditorTools {
     ) -> Result<String, McpError> {
         let body = serde_json::json!({ "pages": pages, "filename": filename });
         let v = self
-            .post_json(&format!("/api/documents/{id}/extract"), &body)
+            .post_json_timeout(
+                &format!("/api/documents/{id}/extract"),
+                &body,
+                HEAVY_TIMEOUT,
+            )
             .await?;
         Ok(pretty(&v))
     }
@@ -582,7 +609,11 @@ impl PdfEditorTools {
     ) -> Result<String, McpError> {
         let body = serde_json::json!({ "sourceId": source_id, "pages": pages, "at": at });
         let v = self
-            .post_json(&format!("/api/documents/{id}/pages/insert-from"), &body)
+            .post_json_timeout(
+                &format!("/api/documents/{id}/pages/insert-from"),
+                &body,
+                HEAVY_TIMEOUT,
+            )
             .await?;
         Ok(pretty(&v))
     }
@@ -601,7 +632,11 @@ impl PdfEditorTools {
             "filename": filename,
         });
         let v = self
-            .post_json(&format!("/api/documents/{id}/compress"), &body)
+            .post_json_timeout(
+                &format!("/api/documents/{id}/compress"),
+                &body,
+                HEAVY_TIMEOUT,
+            )
             .await?;
         Ok(pretty(&v))
     }
@@ -639,6 +674,22 @@ impl PdfEditorTools {
         >,
     ) -> Result<String, McpError> {
         let body = serde_json::json!({ "format": format, "pages": pages });
+        let req = self
+            .client
+            .post(self.url(&format!("/api/documents/{id}/export")))
+            .timeout(OFFICE_TIMEOUT)
+            .json(&body);
+        self.download_to_file(req, &output_path).await
+    }
+
+    #[tool(
+        description = "Convert a document to Markdown (text + tables) via the backend's Python sidecar (markitdown), writing the result to output_path (parent directory must already exist). Always converts the whole document — the backend's markdown export has no page filter, unlike export_pages/convert_to_office. Scanned pages with no text layer come out blank (run OCR first if needed). Can take up to a few minutes for large documents — the backend sidecar itself times out a single conversion at 300s. Read-only: does not modify the document or create a stored document id. Returns JSON {path, bytes} for the written file."
+    )]
+    async fn convert_to_markdown(
+        &self,
+        Parameters(ConvertToMarkdownArgs { id, output_path }): Parameters<ConvertToMarkdownArgs>,
+    ) -> Result<String, McpError> {
+        let body = serde_json::json!({ "format": "markdown" });
         let req = self
             .client
             .post(self.url(&format!("/api/documents/{id}/export")))

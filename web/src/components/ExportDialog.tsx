@@ -16,6 +16,7 @@ const FORMAT_HINTS: Record<ExportFormat, string> = {
   pptx: 'PPTX：每頁一張投影片',
   docx: 'Word：文字轉換，轉檔可能需要較長時間，請耐心等候',
   xlsx: 'Excel：表格轉換，轉檔可能需要較長時間，請耐心等候',
+  markdown: 'Markdown：整份文件轉純文字＋表格，不支援頁面篩選；掃描頁若無文字層會是空白（可先跑 OCR）',
 }
 
 const RASTER_FORMATS: ExportFormat[] = ['png', 'jpg', 'tiff', 'pptx']
@@ -41,8 +42,9 @@ export default function ExportDialog({ doc, onClose }: Props) {
     }
   }, [spec, doc.pageCount])
 
-  const valid = specError === null
   const isRaster = RASTER_FORMATS.includes(format)
+  const showPageSpec = format !== 'markdown'
+  const valid = !showPageSpec || specError === null
 
   const submit = async () => {
     if (!valid) return
@@ -51,7 +53,7 @@ export default function ExportDialog({ doc, onClose }: Props) {
     try {
       await exportDocument(doc.id, {
         format,
-        pages,
+        pages: showPageSpec ? pages : undefined,
         dpi: isRaster ? dpi : undefined,
         quality: format === 'jpg' ? quality : undefined,
       })
@@ -92,22 +94,27 @@ export default function ExportDialog({ doc, onClose }: Props) {
             <option value="pptx">PPTX</option>
             <option value="docx">Word (.docx)</option>
             <option value="xlsx">Excel (.xlsx)</option>
+            <option value="markdown">Markdown (.md)</option>
           </select>
           <div className="export-format-hint">{FORMAT_HINTS[format]}</div>
 
-          <div className="modal-subtitle">
-            頁碼範圍（1-based，如 1,3,5-9），共 {doc.pageCount} 頁；留空＝全部頁面
-          </div>
-          <input
-            className="modal-input"
-            placeholder="全部"
-            value={spec}
-            onChange={(e) => setSpec(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') void submit()
-            }}
-          />
-          {specError && <div className="annot-hint">{specError}</div>}
+          {showPageSpec && (
+            <>
+              <div className="modal-subtitle">
+                頁碼範圍（1-based，如 1,3,5-9），共 {doc.pageCount} 頁；留空＝全部頁面
+              </div>
+              <input
+                className="modal-input"
+                placeholder="全部"
+                value={spec}
+                onChange={(e) => setSpec(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void submit()
+                }}
+              />
+              {specError && <div className="annot-hint">{specError}</div>}
+            </>
+          )}
 
           {isRaster && (
             <>

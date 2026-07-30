@@ -109,7 +109,12 @@ export default function TextLineLayer({ docId, page, scale, version, onChanged }
             value={editValue}
             onChange={(e) => setEditValue(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Escape') setSelected(null)
+              // preventDefault：見 SearchPanel 同名處的說明——不下這行，同一下 Escape
+              // 會繼續冒泡到 DocumentWorkspace 而順手退出全螢幕。
+              if (e.key === 'Escape') {
+                e.preventDefault()
+                setSelected(null)
+              }
             }}
           />
           <div className="annot-popup-actions">
@@ -129,7 +134,10 @@ export default function TextLineLayer({ docId, page, scale, version, onChanged }
               onChange={(e) => setInsertValue(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') submitInsert()
-                if (e.key === 'Escape') setSelected(null)
+                if (e.key === 'Escape') {
+                  e.preventDefault()
+                  setSelected(null)
+                }
               }}
             />
             <div className="annot-popup-actions">

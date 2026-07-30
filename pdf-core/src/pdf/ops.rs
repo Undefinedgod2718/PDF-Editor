@@ -88,12 +88,24 @@ pub fn doc_info(doc: &PdfDocument) -> anyhow::Result<DocInfo> {
 /// (1.0 = 72 dpi). Shared by the PNG render endpoint and the pixel-diff
 /// pass in `compare.rs`, which needs the buffer without a PNG round-trip.
 pub fn render_page_image(doc: &PdfDocument, index: u16, scale: f32) -> anyhow::Result<RgbaImage> {
+    render_page_image_with(doc, index, scale, true)
+}
+
+/// As [render_page_image], but with the annotation layer optional. Printing
+/// needs it off for the "document only" case — an offer letter goes out
+/// without the reviewer's highlighter on it.
+pub fn render_page_image_with(
+    doc: &PdfDocument,
+    index: u16,
+    scale: f32,
+    annotations: bool,
+) -> anyhow::Result<RgbaImage> {
     let page = doc.pages().get(index)?;
     let width = (page.width().value * scale).round() as i32;
     let config = PdfRenderConfig::new()
         .set_target_width(width)
         .render_form_data(true)
-        .render_annotations(true);
+        .render_annotations(annotations);
     let bitmap = page.render_with_config(&config)?;
     Ok(bitmap.as_image().to_rgba8())
 }

@@ -1,17 +1,72 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <!--
-    When SETDEFAULTPDF=1 (DefaultPdfDlg checkbox), set HKCU .pdf default ProgId.
-    main.wxs registers ProgId "{{bundle_id}}.pdf" in OpenWithProgids.
-    Windows 10/11 may still prompt in Settings > Default apps — OS limitation.
+    PDF default-handler registration.
+
+    !! DO NOT USE {{handlebars}} PLACEHOLDERS IN THIS FILE !!
+
+    main.wxs is a Tauri template and IS rendered through handlebars, but
+    fragmentPaths files are NOT. tauri-bundler 2.9.4
+    (src/bundle/windows/msi/mod.rs, the `for input_path in input_paths` loop)
+    renders each fragment into a throwaway string used only to sniff which
+    WixXxxExtension.dll to load, then hands candle.exe the ORIGINAL on-disk
+    path. Whatever is literally in this file is what candle compiles.
+
+    This bit us: the previous revision wrote Value="{{bundle_id}}.pdf" here and
+    every install put the literal 15-character string "{{bundle_id}}.pdf" into
+    HKCU\Software\Classes\.pdf — a ProgId that does not exist. Verified on a
+    real installed machine. Hence the hardcoded identifiers below; they must be
+    kept in sync by hand with desktop/tauri.conf.json:
+
+      identifier   asia.lichang.pdf-editor   -> ProgId "asia.lichang.pdf-editor.pdf"
+      publisher    Lichang                   -> registry vendor key
+      productName  PDF Editor
+
+    Windows reality check: writing the .pdf ProgId does NOT take the default
+    away from whatever the user already uses. Since Windows 8,
+    HKCU\...\Explorer\FileExts\.pdf\UserChoice wins, and it is hash-protected —
+    only the user, through the OS UI, can change it. Anything that forges that
+    hash is malware behaviour and is not done here. So we do the two things an
+    installer legitimately can:
+
+      1. Register Application Capabilities + RegisteredApplications, which is
+         what makes the app show up as a candidate in Settings > Default apps
+         (the same mechanism Chrome and Firefox use).
+      2. Deep-link the user straight to our page in Settings after install
+         (see OpenDefaultAppsSettings in main.wxs) so it is one click, not a
+         scavenger hunt.
+
+    The .pdf ProgId write still has a purpose: on a profile that has no
+    UserChoice for .pdf yet, it is the effective default.
   -->
   <Fragment>
     <DirectoryRef Id="TARGETDIR">
+      <!--
+        Unconditional: "this app can open PDFs" is a capability statement, not a
+        takeover. It only makes the app selectable in Settings > Default apps.
+        Registering it even when the checkbox is cleared means a user who
+        changes their mind later can still find us there.
+      -->
+      <Component Id="PdfCapabilities" Guid="*">
+        <RegistryKey Root="HKCU" Key="Software\Lichang\PDF Editor\Capabilities">
+          <RegistryValue Name="ApplicationName" Type="string" Value="PDF Editor" KeyPath="yes" />
+          <RegistryValue Name="ApplicationDescription" Type="string" Value="檢視、註解與編輯 PDF 文件。" />
+          <RegistryKey Key="FileAssociations">
+            <RegistryValue Name=".pdf" Type="string" Value="asia.lichang.pdf-editor.pdf" />
+          </RegistryKey>
+        </RegistryKey>
+        <!-- The index Settings reads. Value is a registry path relative to the same root. -->
+        <RegistryValue Root="HKCU" Key="Software\RegisteredApplications" Name="PDF Editor" Type="string" Value="Software\Lichang\PDF Editor\Capabilities" />
+      </Component>
+
+      <!--
+        Conditional: only when the user ticked the box on DefaultPdfDlg.
+        UILevel=5 keeps unattended/silent installs from quietly grabbing .pdf.
+      -->
       <Component Id="DefaultPdfAssociation" Guid="*">
-        <!-- UILevel=5 prevents unattended installs from silently taking over .pdf. -->
         <Condition>SETDEFAULTPDF="1" AND UILevel=5</Condition>
         <RegistryKey Root="HKCU" Key="Software\Classes\.pdf">
-          <RegistryValue Type="string" Value="{{bundle_id}}.pdf" KeyPath="yes" />
+          <RegistryValue Type="string" Value="asia.lichang.pdf-editor.pdf" KeyPath="yes" />
         </RegistryKey>
       </Component>
     </DirectoryRef>

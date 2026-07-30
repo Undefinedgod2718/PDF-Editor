@@ -74,9 +74,15 @@ body,
 }
 
 /* ---------- layout ---------- */
-.app {
+.app-shell {
   height: 100%;
   display: flex;
+  flex-direction: column;
+}
+
+.app {
+  flex: 1;
+  min-height: 0;
   flex-direction: column;
 }
 
@@ -84,6 +90,234 @@ body,
   flex: 1;
   display: flex;
   min-height: 0;
+}
+
+.workspace-error {
+  margin: 0;
+  padding: 4px 12px;
+}
+
+/* Viewer 的直接包裝層：只包 Viewer 本身，不含縮圖面板。左側浮動工具條（.tool-rail）
+   要貼齊「頁面」的左緣，縮圖面板顯示與否會改變 Viewer 的起始 x 座標，所以浮動條
+   跟著 Viewer 一起包在這層裡面用 position:absolute 定位，而不是相對整個 .workspace。 */
+.viewer-pane {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+}
+
+/* ---------- 全螢幕（沉浸閱讀）---------- */
+/* App.tsx 用 document.body.dataset.fullscreen 切這個屬性；只藏 tab bar／每個分頁的
+   toolbar，頁面內容（.workspace 以下）維持原樣，不做任何版面重排。 */
+/* 全螢幕＝只留頁面。藏的是 .toolbar-row 這個外層而不是 .toolbar，因為註解工具列
+   （.annot-toolbar，14 顆按鈕＋8 個色票）是它的兄弟節點——只藏 .toolbar 的話那一整排
+   會留在畫面上，全螢幕等於沒生效。 */
+body[data-fullscreen="true"] .tab-bar,
+body[data-fullscreen="true"] .tool-tabs,
+body[data-fullscreen="true"] .toolbar-row,
+body[data-fullscreen="true"] .tool-rail,
+/* 彈出選單 portal 到 body，不是這些元件的子節點，所以要自己列一條——不然按 F11 時
+   開著的選單會留在畫面上飄著。 */
+body[data-fullscreen="true"] .tool-menu-pop {
+  display: none;
+}
+
+.fullscreen-exit-hint {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 80;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(38, 42, 45, 0.9);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+.fullscreen-exit-hint.visible,
+.fullscreen-exit-hint:hover,
+.fullscreen-exit-hint:focus-visible {
+  opacity: 1;
+}
+
+/* ---------- tab bar ---------- */
+.tab-bar {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 4px 6px 0;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 6px 12px;
+  max-width: 220px;
+  background: var(--bg-toolbar);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  cursor: pointer;
+  user-select: none;
+  color: var(--text-dim);
+}
+
+.tab.active {
+  background: var(--bg-dark);
+  color: var(--text);
+}
+
+.tab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-dirty-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.tab-close {
+  flex: none;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.tab-close:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.tab-new,
+.tab-recent {
+  flex: none;
+  align-self: center;
+  margin-left: 4px;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-toolbar);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.tab-new:hover,
+.tab-recent:hover {
+  filter: brightness(1.1);
+}
+
+.shell-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+  padding: 6px 12px;
+  background: rgba(255, 107, 107, 0.12);
+}
+
+.shell-error-dismiss {
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 4px;
+}
+
+/* ---------- 工具分類頁籤（②b：所有工具/檢視/註解/編輯/轉換/保護）---------- */
+.tool-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 4px 12px 0;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+.tool-tab {
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  background: var(--bg-toolbar);
+  color: var(--text-dim);
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tool-tab:hover {
+  filter: brightness(1.1);
+}
+
+.tool-tab.active {
+  background: var(--bg-toolbar);
+  color: var(--text);
+  border-bottom: 2px solid var(--accent);
+}
+
+/* Toolbar／AnnotToolbar 各自仍是獨立元件（各自的 state／props 邊界不動），這裡只用
+   flex row 把兩者在視覺上併成頁籤下方的「單一列」。全螢幕隱藏規則也掛在這一層，
+   見上方 body[data-fullscreen] 區塊。
+
+   nowrap + 橫向捲動，跟上面 .tool-tabs 同一個策略。原本是 flex-wrap: wrap，工具一多
+   就把整列撐成兩三行、把頁面往下擠。寧可捲，不要換行。 */
+.toolbar-row {
+  display: flex;
+  align-items: stretch;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+
+/* .toolbar 吃掉列上的剩餘寬度（讓內部 .toolbar-title 的 flex:1 跟改版前一樣有空間可撐開
+   置中），.annot-toolbar 維持內容自然寬度接在後面——兩者仍是各自獨立的 flex 容器。
+
+   可以長大，但**不可**縮小到內容寬度以下（原本是 `1 1 auto` + `min-width: 0`）——縮下去
+   就會輪到裡面的按鈕被壓扁。放不下時由 .toolbar-row 的 overflow-x 負責。 */
+.toolbar-row > .toolbar {
+  flex: 1 0 auto;
+}
+
+.toolbar-row > .annot-toolbar {
+  flex: 0 0 auto;
+}
+
+.tool-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.tool-section-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  padding: 0 2px;
 }
 
 /* ---------- toolbar ---------- */
@@ -100,6 +334,7 @@ body,
   display: flex;
   align-items: center;
   gap: 4px;
+  flex: 0 0 auto;
 }
 
 .toolbar-title {
@@ -112,10 +347,27 @@ body,
   text-overflow: ellipsis;
 }
 
+.save-message {
+  color: #4caf7d;
+}
+
+.tb-btn .dirty-dot {
+  position: relative;
+  top: -8px;
+  left: 1px;
+  font-size: 8px;
+  color: #ff9f43;
+}
+
+/* flex: 0 0 auto ＋ nowrap 是這裡的重點：少了它們，被擠的按鈕會一路縮到 min-width
+   的 32px，中文標籤（「上方插入空白頁」之類）就變成一個字一行的直排。工具列寧可
+   捲出去，也不要把按鈕壓爛。 */
 .tb-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex: 0 0 auto;
+  white-space: nowrap;
   min-width: 32px;
   height: 32px;
   padding: 0 6px;
@@ -141,12 +393,54 @@ body,
   cursor: default;
 }
 
+.doc-tools-menu {
+  position: relative;
+}
+
+.doc-tools-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+  padding: 4px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+}
+
+.doc-tools-dropdown button {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.doc-tools-dropdown button:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.doc-tools-dropdown button.active {
+  background: rgba(76, 141, 255, 0.25);
+}
+
 .page-indicator,
 .zoom-indicator {
   font-size: 13px;
   color: var(--text-dim);
   min-width: 48px;
   text-align: center;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .page-indicator input {
@@ -265,6 +559,182 @@ body,
   align-items: center;
   gap: 16px;
   padding: 24px;
+}
+
+/* ---------- 左側浮動工具條（②c，對標 Acrobat 的 vertical rail）---------- */
+/* 所有分頁都顯示（使用者定案，接受蓋住頁面左緣 ~48px 的成本），全螢幕時隨
+   .toolbar-row 等一起藏起來，見上方 body[data-fullscreen] 規則。 */
+.tool-rail {
+  position: absolute;
+  top: 12px;
+  left: 8px;
+  z-index: 55;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+.tool-rail-slot-wrap {
+  position: relative;
+}
+
+.tool-rail-slot {
+  position: relative;
+  border-radius: 6px;
+}
+
+/* 整格反白＝「這一群裡有工具正在用」，不是「這是最後用的子工具」——圖示本身
+   永遠不變（見 ToolRail.tsx 開頭註解），跟頂部頁籤／AnnotToolbar 的 active 邏輯共用同一個判斷。 */
+.tool-rail-slot.active {
+  background: rgba(76, 141, 255, 0.25);
+}
+
+.tool-rail-btn {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.tool-rail-slot:not(.active) .tool-rail-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* 右下角三角：代表這格有子選單。獨立的小按鈕（不是偽元素），才能單獨接收點擊
+   跟鍵盤 focus，不用靠長按或右鍵這種不好發現的手勢。 */
+.tool-rail-caret {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 8px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tool-rail-caret:hover,
+.tool-rail-caret[aria-expanded="true"] {
+  color: var(--text);
+}
+
+/* ---------- ToolMenu（工具列下拉／浮動條 flyout 共用）---------- */
+.tool-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+.tool-menu-trigger {
+  gap: 2px;
+}
+
+.tool-menu-caret {
+  font-size: 9px;
+  line-height: 1;
+  opacity: 0.7;
+}
+
+/* position: fixed ＋ portal 到 body：座標由 ToolMenu 依觸發鈕量出來寫在 style 上。
+   不能用 absolute——.toolbar-row 有 overflow-x: auto，會把絕對定位的子元素裁掉。 */
+.tool-menu-pop {
+  position: fixed;
+  z-index: 70;
+  min-width: 160px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+}
+
+.tool-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tool-menu-item:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.tool-menu-item.active {
+  background: rgba(76, 141, 255, 0.25);
+}
+
+/* 固定寬度讓選單裡的文字對齊成一欄，圖示寬度不一（emoji 與組合字元混用）也不會歪。 */
+.tool-menu-icon {
+  display: inline-block;
+  width: 18px;
+  text-align: center;
+}
+
+.tool-menu-item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* 浮動條 flyout 的內部排版（一組一列，色票自己一組）。定位與外框由 .tool-menu-pop
+   負責，這個 class 只管內容怎麼排。 */
+.tool-rail-submenu {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tool-rail-submenu-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.tool-rail-palette {
+  gap: 6px;
+}
+
+/* 平移（手形）模式：容器自己接手拖曳捲動，底下各層（AnnotLayer 等）的
+   pointer-events 全部關掉，避免搶走拖曳事件。 */
+.viewer-panning {
+  cursor: grab;
+}
+
+.viewer-panning:active {
+  cursor: grabbing;
+}
+
+.viewer-panning * {
+  pointer-events: none;
 }
 
 .page {
@@ -423,6 +893,88 @@ body,
   cursor: crosshair;
 }
 
+/* 'select' 工具：整層開放 pointer events（讓空白處點擊能清掉選取），
+   但不用十字游標——這裡是選取/拖曳既有註解，不是畫新的。 */
+.annot-layer-select {
+  pointer-events: auto;
+}
+
+.annot-select-box {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  cursor: move;
+  pointer-events: auto;
+}
+
+.annot-select-box:hover {
+  border-color: rgba(76, 141, 255, 0.6);
+  background: rgba(76, 141, 255, 0.08);
+}
+
+.annot-select-box.selected {
+  border: 1.5px solid var(--accent);
+  background: rgba(76, 141, 255, 0.1);
+}
+
+.annot-select-handle {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  margin: -5px;
+  background: var(--accent);
+  border: 1px solid #fff;
+  border-radius: 2px;
+  pointer-events: auto;
+}
+
+.annot-select-handle-nw {
+  left: 0;
+  top: 0;
+  cursor: nwse-resize;
+}
+
+.annot-select-handle-ne {
+  left: 100%;
+  top: 0;
+  cursor: nesw-resize;
+}
+
+.annot-select-handle-sw {
+  left: 0;
+  top: 100%;
+  cursor: nesw-resize;
+}
+
+.annot-select-handle-se {
+  left: 100%;
+  top: 100%;
+  cursor: nwse-resize;
+}
+
+.annot-drag-error {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  right: 4px;
+  z-index: 20;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(220, 60, 60, 0.15);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  pointer-events: auto;
+}
+
+.annot-drag-error span {
+  flex: 1;
+  white-space: pre-wrap;
+}
+
 .annot-drag-preview {
   position: absolute;
   border: 1px dashed;
@@ -565,8 +1117,89 @@ body,
   font-size: 11px;
 }
 
+.annot-item-author {
+  color: var(--text-dim);
+  font-size: 11px;
+  font-style: italic;
+}
+
 .annot-item-del {
   flex-shrink: 0;
+}
+
+.annot-item-wrap {
+  border-bottom: 1px solid var(--border);
+}
+
+.annot-item-wrap .annot-item {
+  border-bottom: none;
+}
+
+.annot-item-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 2px;
+}
+
+.annot-author-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.annot-author-row input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 3px 6px;
+  font-size: 12px;
+}
+
+.annot-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 12px;
+  background: rgba(220, 60, 60, 0.15);
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.annot-error span {
+  flex: 1;
+  white-space: pre-wrap;
+}
+
+.annot-edit-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 12px 10px;
+  cursor: default;
+}
+
+.annot-edit-box textarea {
+  resize: vertical;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  padding: 4px 6px;
+  font-family: inherit;
+}
+
+.annot-edit-actions {
+  display: flex;
+  gap: 6px;
 }
 
 /* ---------- modal dialogs (合併/擷取) ---------- */
@@ -1014,6 +1647,61 @@ body,
   margin-top: 4px;
 }
 
+/* ---------- 區域密文／光柵化（Phase 12）---------- */
+.redact-layer {
+  position: absolute;
+  inset: 0;
+  cursor: crosshair;
+  pointer-events: auto;
+}
+
+.redact-pending-rect {
+  position: absolute;
+  border: 2px solid #000;
+  background: rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+}
+
+.redact-drag-preview {
+  border-style: dashed;
+}
+
+.redact-bar {
+  position: fixed;
+  top: 90px;
+  right: 24px;
+  z-index: 60;
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+}
+
+.redact-bar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 14px;
+}
+
+.redact-bar-status {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.redact-bar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
 /* ---------- 通用 radio 群組（裁切／調整大小對話框共用）---------- */
 .radio-group {
   display: flex;
@@ -1237,4 +1925,372 @@ body,
   background: var(--accent);
   border: 1px solid #fff;
   cursor: nwse-resize;
+}
+
+/* ---------- 動作精靈（Action Wizard, P17）---------- */
+.modal-wide {
+  width: 640px;
+}
+
+/* ---------- 最近使用檔案 modal（TabBar「開啟…」按鈕，分頁開啟中仍可叫出） ----------
+   RecentPanel 內部用 height: 100% 撐版面（見 .recent-panel），.modal 預設只有
+   max-height（隨內容自然撐開），套不到固定高度就會塌陷，所以這裡另外給一個
+   明確高度；.modal-body 預設的 padding/gap 也會把 RecentPanel 自己的版面擠壞，
+   一併歸零、讓 RecentPanel 自己控制內距與捲動。 */
+.recent-modal {
+  height: 70vh;
+}
+
+.recent-modal .modal-body {
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+}
+
+.wizard-steps {
+  display: flex;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+
+.wizard-step-tab {
+  flex: 1;
+  text-align: center;
+  padding: 4px 6px;
+  border-bottom: 2px solid var(--border);
+}
+
+.wizard-step-tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+.wizard-step-tab.done {
+  color: var(--text-dim);
+}
+
+.wizard-mode-tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.wizard-mode-tabs button.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.wizard-step-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.wizard-step-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.wizard-step-card-header select {
+  flex: 1;
+}
+
+.wizard-dropzone {
+  border: 2px dashed var(--border);
+  border-radius: 6px;
+  padding: 16px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.wizard-dropzone.drag-over {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.wizard-file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  font-size: 12px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.wizard-file-row-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wizard-file-status-pending {
+  color: var(--text-dim);
+}
+
+.wizard-file-status-done {
+  color: var(--accent);
+}
+
+.wizard-file-status-error {
+  color: #e05656;
+}
+
+/* ---------- 最近使用面板（Recent panel） ---------- */
+.recent-panel {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  height: 100%;
+}
+
+.recent-sidebar {
+  width: 200px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 8px;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+}
+
+.recent-sidebar-item {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.recent-sidebar-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+}
+
+.recent-sidebar-item.active {
+  background: rgba(76, 141, 255, 0.25);
+  color: var(--text);
+}
+
+.recent-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 20px 24px;
+  overflow-y: auto;
+}
+
+.recent-heading {
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+.recent-loading,
+.recent-empty-hint {
+  color: var(--text-dim);
+  padding: 8px 0;
+}
+
+.recent-error {
+  margin-bottom: 12px;
+}
+
+.recent-welcome {
+  flex: 1;
+}
+
+.recent-table {
+  display: flex;
+  flex-direction: column;
+}
+
+.recent-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.recent-row:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.recent-row-missing {
+  opacity: 0.5;
+}
+
+.recent-cell {
+  overflow: hidden;
+}
+
+.recent-cell-thumb {
+  flex: none;
+  width: 32px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.recent-cell-thumb img {
+  max-width: 100%;
+  max-height: 100%;
+  background: #fff;
+  border-radius: 2px;
+  object-fit: contain;
+}
+
+.recent-thumb-placeholder {
+  width: 100%;
+  height: 100%;
+}
+
+.recent-cell-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+
+.recent-cell-date {
+  flex: none;
+  width: 160px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.recent-cell-size {
+  flex: none;
+  width: 80px;
+  color: var(--text-dim);
+  font-size: 13px;
+  text-align: right;
+}
+
+.recent-cell-actions {
+  flex: none;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.recent-row:hover .recent-cell-actions {
+  opacity: 1;
+}
+
+.recent-star-btn.active {
+  color: #ffc107;
+}
+
+.recent-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.recent-clear-btn {
+  width: auto;
+  padding: 0 12px;
+  color: var(--text-dim);
+}
+
+.recent-clear-btn:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.recent-computer-panel {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.recent-browse-btn {
+  padding: 16px 48px;
+  font-size: 16px;
+}
+
+/* ---------- 列印對話框 ---------- */
+/* 刻意不套用 .annot-hint 那套橘色警示樣式——「已取消列印」不是錯誤，跟真正失敗的
+   訊息（同樣顯示在這個對話框裡）在觀感上要分得開。 */
+.print-status {
+  font-size: 12px;
+  color: var(--text-dim);
+  padding: 4px 10px;
+}
+
+/* ---------- 列印（web 版 window.print()，見 print.rs 模組註解：瀏覽器碰不到印表機
+   device context，桌面版才有 /api/local/print 這條路）---------- */
+/* deny-list：只留 .viewer 底下的 .page，其餘全部藏起來。跟上面全螢幕那組
+   （.tab-bar/.tool-tabs/.toolbar-row/.tool-rail）共用同一批選擇器，另外加上
+   分頁內才會出現的浮動面板／工具列（縮圖、搜尋、註解、裁切、影像、表單建立、
+   密文）與所有對話框（.modal-overlay，涵蓋 ExportDialog 等全部＋這裡的
+   PrintDialog 自己——正常流程按下列印前它已經 onClose，這條規則只是保險）。
+   兩份文件同時開啟時，非現用分頁的 .app 本來就有 inline style display:none
+   （見 DocumentWorkspace.tsx），inline style 優先於外部樣式表，這裡不用特別
+   再排除它。 */
+@media print {
+  .tab-bar,
+  .tool-tabs,
+  .toolbar-row,
+  .tool-rail,
+  .thumb-panel,
+  .search-panel,
+  .annot-panel,
+  .crop-bar,
+  .form-builder-bar,
+  .redact-bar,
+  .modal-overlay,
+  .fullscreen-exit-hint,
+  .error {
+    display: none !important;
+  }
+
+  html,
+  body,
+  .app-shell,
+  .app,
+  .workspace,
+  .viewer-pane {
+    background: #fff !important;
+  }
+
+  /* 捲動容器本身在列印時不裁切內容——否則畫面上看不到的頁面（捲軸下方）不會印出來。 */
+  .viewer {
+    overflow: visible !important;
+    padding: 0 !important;
+    gap: 0 !important;
+  }
+
+  .page {
+    box-shadow: none !important;
+    break-after: page;
+    page-break-after: always;
+  }
+
+  .page:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
 }

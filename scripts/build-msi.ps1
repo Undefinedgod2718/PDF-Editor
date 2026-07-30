@@ -1,14 +1,18 @@
 # Build PDF Editor desktop MSI on Windows (WiX Toolset v3 via Tauri).
-# Run from repo root:  .\deploy\windows\build-msi.ps1
+# Run from repo root:  .\scripts\build-msi.ps1
 #
 # Prerequisites:
 #   - Node.js, Rust (stable), Visual Studio Build Tools
 #   - WiX Toolset v3 (Tauri bundles MSI)
-#   - web/dist built; pdfium.dll at server/pdfium.dll
-#   - GenSenRoundedTW-R.ttf at server/fonts/ (see deploy/windows/deploy.sh)
+#   - pdfium.dll at server/pdfium.dll
+#   - GenSenRoundedTW-R.ttf at server/fonts/
+#   - eng.traineddata / chi_tra.traineddata at server/tessdata/ (see .gitignore
+#     for the curl download commands)
+#
+# This script runs npm ci + web build itself before the Tauri MSI bundle.
 
 $ErrorActionPreference = "Stop"
-$Root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+$Root = Split-Path $PSScriptRoot -Parent
 Set-Location $Root
 
 Write-Host "==> npm ci + build (web/)"
@@ -27,6 +31,13 @@ if (-not (Test-Path $Pdfium)) {
 $Font = Join-Path $Root "server\fonts\GenSenRoundedTW-R.ttf"
 if (-not (Test-Path $Font)) {
     Write-Error "Missing $Font — copy the CJK font into server/fonts/ before building MSI."
+}
+
+foreach ($Lang in @("eng", "chi_tra")) {
+    $Tessdata = Join-Path $Root "server\tessdata\$Lang.traineddata"
+    if (-not (Test-Path $Tessdata)) {
+        Write-Error "Missing $Tessdata — download it first, e.g.:`n  curl -fSL -o server\tessdata\$Lang.traineddata https://github.com/tesseract-ocr/tessdata/raw/main/$Lang.traineddata"
+    }
 }
 
 Write-Host "==> cargo tauri build --bundles msi (desktop/)"

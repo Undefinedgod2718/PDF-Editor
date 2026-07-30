@@ -1,10 +1,12 @@
 //! 單人服務桌面殼（ADR-002/003 Phase 1）。
 //!
 //! 內嵌 `server` lib 的 axum router，bind `127.0.0.1:0`（隨機埠），
-//! 每次啟動產生一次性 token；WebView initialization script 攔截
-//! `fetch`，自動加 `Authorization: Bearer <token>`（token 不進
-//! `document.cookie`，降低 XSS 外洩面）。`/api/*` 缺 token 一律 401。
-//! 終態（Phase 2）遷 Tauri IPC 後關閉整個 port。
+//! 每次啟動產生一次性 token。雙軌認證：WebView initialization script 攔截
+//! `fetch`，自動加 `Authorization: Bearer <token>`；同時伺服器對非 `/api`
+//! 回應（首頁、靜態檔）補一個 `HttpOnly` cookie，讓 `<img src>`／
+//! `<a download>` 這類不經過 `window.fetch` 的請求也能帶認證——`HttpOnly`
+//! 讓 XSS 讀不到 cookie 值，token 仍不會透過 `document.cookie` 外洩。
+//! `/api/*` 兩者都缺一律 401。終態（Phase 2）遷 Tauri IPC 後關閉整個 port。
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -19,9 +21,11 @@ use axum::middleware::Next;
 use axum::response::Response;
 use tower_http::services::{ServeDir, ServeFile};
 
-use pdf_editor_server::{api, pdf, sidecar, storage, AppState, SharedState};
+use pdf_editor_server::{actions, api, pdf, sidecar, storage, AppState, SharedState};
 
 mod local_api;
+mod print;
+mod recent;
 
 const MAX_UPLOAD_BYTES: usize = 200 * 1024 * 1024;
 const TOKEN_COOKIE: &str = "pdfed_token";
@@ -46,14 +50,20 @@ fn generate_token() -> anyhow::Result<String> {
     ))
 }
 
-/// `/api/*` 需帶 token（Bearer 優先；cookie 僅相容舊 CI）；靜態前端檔放行。
+/// `/api/*` 需帶 token（Bearer 優先；cookie 亦可）；靜態前端檔放行，但順便在
+/// 回應上補一個 `HttpOnly` cookie（見下方 `set_auth_cookie`）——`<img src>`／
+/// `<a download>` 這類不經過 `window.fetch` 的請求靠這個 cookie 自動帶認證，
+/// `HttpOnly` 讓注入的 XSS 讀不到，不會重新打開 auth_init_script 原本要避免
+/// 的「token 進 document.cookie 可被 JS 讀出」風險。
 async fn require_token(
     token: Arc<String>,
     req: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
     if !req.uri().path().starts_with("/api") {
-        return Ok(next.run(req).await);
+        let mut res = next.run(req).await;
+        set_auth_cookie(&mut res, &token);
+        return Ok(res);
     }
     let cookie_ok = req
         .headers()
@@ -75,6 +85,17 @@ async fn require_token(
         Ok(next.run(req).await)
     } else {
         Err(StatusCode::UNAUTHORIZED)
+    }
+}
+
+/// `token` 全 ascii hex（見 `generate_token`），直接格式化進 header value 不會
+/// 產生非法字元/換行注入。沒有 `Secure`：整個 app 只跑 `http://127.0.0.1`，
+/// 加了 `Secure` 瀏覽器會整條丟掉這個 cookie。
+fn set_auth_cookie(res: &mut Response, token: &str) {
+    if let Ok(value) =
+        header::HeaderValue::from_str(&format!("{TOKEN_COOKIE}={token}; HttpOnly; SameSite=Strict; Path=/"))
+    {
+        res.headers_mut().append(header::SET_COOKIE, value);
     }
 }
 
@@ -119,6 +140,12 @@ fn resolve_web_dist() -> anyhow::Result<PathBuf> {
     anyhow::bail!("web frontend not found beside executable or in development tree")
 }
 
+fn is_pdf_path(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("pdf"))
+}
+
 /// 檔案關聯／CLI：`pdf-editor-desktop.exe path\to\file.pdf`
 fn startup_pdf_from_argv() -> Option<PathBuf> {
     for arg in std::env::args_os().skip(1) {
@@ -126,15 +153,33 @@ fn startup_pdf_from_argv() -> Option<PathBuf> {
             continue;
         }
         let path = PathBuf::from(arg);
-        if path
-            .extension()
-            .and_then(|e| e.to_str())
-            .is_some_and(|e| e.eq_ignore_ascii_case("pdf"))
-        {
+        if is_pdf_path(&path) {
             return Some(path);
         }
     }
     None
+}
+
+/// 拖放進視窗：Tauri 攔截 OS 層 drag-drop（`dragDropEnabled` 預設 true），拿到真實路徑，
+/// 不像瀏覽器 File API 只給 blob。多檔只挑第一個 .pdf。
+fn first_pdf_path(paths: &[PathBuf]) -> Option<&PathBuf> {
+    paths.iter().find(|p| is_pdf_path(p))
+}
+
+/// 拖放成功：eval 一段 JS，在前端 dispatch 自訂事件帶 doc id，讓 App.tsx 走既有 openDocById。
+/// 不用 `@tauri-apps/api`（ADR-003 精神：前端只 fetch，不碰 Tauri JS API），純字串注入同 auth_init_script。
+fn dispatch_open_doc_js(id: &uuid::Uuid) -> String {
+    let id_js = serde_json::to_string(&id.to_string()).expect("uuid");
+    format!(
+        r#"window.dispatchEvent(new CustomEvent("pdf-editor:open-doc", {{ detail: {{ id: {id_js} }} }}));"#
+    )
+}
+
+fn dispatch_open_error_js(message: &str) -> String {
+    let message_js = serde_json::to_string(message).expect("error is valid string");
+    format!(
+        r#"window.dispatchEvent(new CustomEvent("pdf-editor:open-error", {{ detail: {{ message: {message_js} }} }}));"#
+    )
 }
 
 /// Init script：用 JSON 字面值帶入 token，攔截 fetch 自動加 Bearer。
@@ -179,6 +224,7 @@ fn main() -> anyhow::Result<()> {
 
     let storage = storage::Storage::new(data_dir())?;
     let engine = pdf::engine::PdfEngine::spawn()?;
+    let actions_store = actions::ActionStore::new(data_dir().join("actions"))?;
 
     let (startup_doc, startup_error) = match startup_pdf_from_argv() {
         Some(path) => match storage.open_path(&path) {
@@ -194,7 +240,14 @@ fn main() -> anyhow::Result<()> {
         },
         None => (None, None),
     };
-    let state: SharedState = Arc::new(AppState { storage, engine });
+    let state: SharedState = Arc::new(AppState {
+        storage,
+        engine,
+        ocr_jobs: Default::default(),
+        actions: actions_store,
+        action_runs: Default::default(),
+    });
+    let dnd_state = state.clone();
 
     match sidecar::health() {
         Ok(_) => tracing::info!("office sidecar ready"),
@@ -279,11 +332,50 @@ fn main() -> anyhow::Result<()> {
         .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
             let _ = local_api::APP_HANDLE.set(app.handle().clone());
-            tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::External(url.clone()))
-                .title("PDF Editor")
-                .inner_size(1440.0, 900.0)
-                .initialization_script(&init_script)
-                .build()?;
+            let window =
+                tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::External(url.clone()))
+                    .title("PDF Editor")
+                    .inner_size(1440.0, 900.0)
+                    .initialization_script(&init_script)
+                    .build()?;
+
+            let evt_window = window.clone();
+            window.on_window_event(move |event| match event {
+                tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => {
+                    let Some(path) = first_pdf_path(paths) else {
+                        return;
+                    };
+                    let js = match dnd_state.storage.open_path(path) {
+                        Ok(meta) => {
+                            tracing::info!("opened dropped PDF: {}", path.display());
+                            dispatch_open_doc_js(&meta.id)
+                        }
+                        Err(e) => {
+                            let message = format!("無法開啟 {}：{e}", path.display());
+                            tracing::warn!("{message}");
+                            dispatch_open_error_js(&message)
+                        }
+                    };
+                    if let Err(e) = evt_window.eval(js) {
+                        tracing::warn!("drag-drop eval failed: {e}");
+                    }
+                }
+                // 關窗一律先攔截，前端才有機會問「未存修改」；確認後前端呼叫
+                // `/api/local/close`，該端點用 `destroy()` 真正關窗（不再走這個攔截）。
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    api.prevent_close();
+                    if let Err(e) = evt_window.eval(
+                        r#"window.dispatchEvent(new CustomEvent("pdf-editor:close-requested"));"#,
+                    ) {
+                        // 前端收不到事件就永遠不會呼叫 /api/local/close，視窗會卡死關不掉
+                        // （使用者只能工作管理員砍）。eval 失敗代表 webview 已經壞了，正常
+                        // 詢問流程走不通，直接強制關窗比卡住合理。
+                        tracing::warn!("close-requested eval failed: {e}; forcing close");
+                        let _ = evt_window.destroy();
+                    }
+                }
+                _ => {}
+            });
             Ok(())
         })
         .build(tauri::generate_context!())

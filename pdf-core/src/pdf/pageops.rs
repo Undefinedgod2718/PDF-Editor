@@ -16,18 +16,51 @@ const DEFAULT_PAGE_H: f32 = 792.0;
 
 /// Set absolute page rotation. Accepts 0 / 90 / 180 / 270.
 pub fn rotate(pdfium: &Pdfium, path: &Path, page_index: u16, degrees: u16) -> anyhow::Result<()> {
-    let rotation = match degrees {
-        0 => PdfPageRenderRotation::None,
-        90 => PdfPageRenderRotation::Degrees90,
-        180 => PdfPageRenderRotation::Degrees180,
-        270 => PdfPageRenderRotation::Degrees270,
-        d => anyhow::bail!("unsupported rotation {d}, use 0/90/180/270"),
-    };
+    let rotation = degrees_to_rotation(degrees.into())?;
     with_document(pdfium, path, |doc| {
         let mut page = doc.pages().get(page_index)?;
         page.set_rotation(rotation);
         Ok(())
     })
+}
+
+/// Rotate every page by `delta` degrees relative to *its own* current
+/// rotation (must be a multiple of 90; negative = counter-clockwise) — one
+/// document save, not one per page. Unlike `rotate` (which sets one page to
+/// an absolute value), this adds to whatever each page already has, so a
+/// document with mixed per-page rotations from prior single-page edits
+/// turns as a whole without flattening those differences.
+pub fn rotate_all(pdfium: &Pdfium, path: &Path, delta: i32) -> anyhow::Result<()> {
+    anyhow::ensure!(delta % 90 == 0, "rotate delta must be a multiple of 90, got {delta}");
+    with_document(pdfium, path, |doc| {
+        let count = doc.pages().len();
+        for index in 0..count {
+            let mut page = doc.pages().get(index)?;
+            let current = rotation_to_degrees(page.rotation()?);
+            let next = (current + delta).rem_euclid(360);
+            page.set_rotation(degrees_to_rotation(next)?);
+        }
+        Ok(())
+    })
+}
+
+fn degrees_to_rotation(degrees: i32) -> anyhow::Result<PdfPageRenderRotation> {
+    match degrees {
+        0 => Ok(PdfPageRenderRotation::None),
+        90 => Ok(PdfPageRenderRotation::Degrees90),
+        180 => Ok(PdfPageRenderRotation::Degrees180),
+        270 => Ok(PdfPageRenderRotation::Degrees270),
+        d => anyhow::bail!("unsupported rotation {d}, use 0/90/180/270"),
+    }
+}
+
+fn rotation_to_degrees(rotation: PdfPageRenderRotation) -> i32 {
+    match rotation {
+        PdfPageRenderRotation::None => 0,
+        PdfPageRenderRotation::Degrees90 => 90,
+        PdfPageRenderRotation::Degrees180 => 180,
+        PdfPageRenderRotation::Degrees270 => 270,
+    }
 }
 
 pub fn delete_page(pdfium: &Pdfium, path: &Path, page_index: u16) -> anyhow::Result<()> {
@@ -171,7 +204,7 @@ pub fn merge(pdfium: &Pdfium, paths: &[std::path::PathBuf]) -> anyhow::Result<Ve
 /// the user sees it (after /Rotate and any existing crop), origin top-left,
 /// y growing downward. The frontend divides pixel coordinates by the render
 /// scale and sends points; rotation handling stays server-side.
-#[derive(Debug, Clone, Copy, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct CropRect {
     pub x: f32,
     pub y: f32,
@@ -370,7 +403,7 @@ fn inherited_rotation(doc: &Document, page_id: ObjectId) -> u16 {
     }
 }
 
-#[derive(Debug, Clone, Copy, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ResizeMode {
     /// Scale page content to fit the new size (uniform, centered).

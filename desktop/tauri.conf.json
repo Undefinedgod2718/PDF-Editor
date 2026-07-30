@@ -25,7 +25,12 @@
       "../server/pdfium.dll": "pdfium.dll",
       "../web/dist/": "web/dist/",
       "../server/fonts/GenSenRoundedTW-R.ttf": "fonts/GenSenRoundedTW-R.ttf",
-      "../server/fonts/SIL_Open_Font_License_1.1.txt": "fonts/SIL_Open_Font_License_1.1.txt"
+      "../server/fonts/SIL_Open_Font_License_1.1.txt": "fonts/SIL_Open_Font_License_1.1.txt",
+      "../server/tessdata/eng.traineddata": "tessdata/eng.traineddata",
+      "../server/tessdata/chi_tra.traineddata": "tessdata/chi_tra.traineddata",
+      "../target-mcp/release/pdf-editor-mcp-server.exe": "pdf-editor-mcp-server.exe",
+      "windows/register-mcp.ps1": "register-mcp.ps1",
+      "windows/unregister-mcp.ps1": "unregister-mcp.ps1"
     },
     "fileAssociations": [
       {
@@ -49,7 +54,9 @@
         },
         "template": "windows/main.wxs",
         "fragmentPaths": ["windows/fragments/default-pdf.wxs"],
-        "componentRefs": ["DefaultPdfAssociation"]
+        "componentRefs": ["PdfCapabilities", "DefaultPdfAssociation"],
+        "bannerPath": "windows/minecraft-banner.bmp",
+        "dialogImagePath": "windows/minecraft-dialog.bmp"
       }
     }
   }

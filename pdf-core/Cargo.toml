@@ -22,3 +22,5 @@ flate2 = "1"
 tiff = "0.9"
 argon2 = { version = "0.5", features = ["std"] }
 similar = "2"
+tesseract-rs = "0.3"
+sha2 = "0.10"

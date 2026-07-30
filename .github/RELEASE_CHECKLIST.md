@@ -10,7 +10,7 @@ CI job `windows-msi` builds `desktop/target/release/bundle/msi/*.msi` on every
 Local build (Windows only):
 
 ```powershell
-.\deploy\windows\build-msi.ps1
+.\scripts\build-msi.ps1
 ```
 
 ICE57 rule: HKCU file associations must **not** share a Component with the
@@ -47,6 +47,6 @@ Includes content editing / page operations (P3) and forms / signatures (P4).
 
 | Milestone | Version |
 |-----------|---------|
-| Phase 5 — production deploy (192.168.17.56) | v0.3.0 or v1.0.0 |
+| Production-ready desktop + web release | v1.0.0 |
 
 Patch releases (`0.x.z`): bug fixes only, no new Phase scope.

@@ -326,12 +326,14 @@ fn presentation_rels_xml(slide_count: usize) -> String {
 }
 
 fn slide_master_xml() -> String {
+    // PowerPoint rejects an empty <p:grpSpPr/> (no a:xfrm). Minimal master
+    // still needs clrMap + sldLayoutIdLst; theme is linked via rels.
     r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:sldMaster xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
 <p:cSld>
 <p:spTree>
 <p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>
-<p:grpSpPr/>
+<p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>
 </p:spTree>
 </p:cSld>
 <p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/>
@@ -355,10 +357,10 @@ fn slide_layout_xml() -> String {
 <p:cSld name="Blank">
 <p:spTree>
 <p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>
-<p:grpSpPr/>
+<p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>
 </p:spTree>
 </p:cSld>
-<p:clrMapOvr><a:overrideClrMapping bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/></p:clrMapOvr>
+<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>
 </p:sldLayout>"#
         .to_string()
 }
@@ -421,13 +423,16 @@ fn theme_xml() -> String {
 }
 
 fn slide_xml(off_x: i64, off_y: i64, ext_cx: i64, ext_cy: i64) -> String {
+    // Each slide MUST relate to a slideLayout (rId1) and the page image (rId2).
+    // Missing the layout relationship makes PowerPoint show the repair dialog
+    // (confirmed against a known-good PPTX from D:\Docs\Project\TG空白PPT.pptx).
     format!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
 <p:cSld>
 <p:spTree>
 <p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>
-<p:grpSpPr/>
+<p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>
 <p:pic>
 <p:nvPicPr>
 <p:cNvPr id="2" name="Picture 1"/>
@@ -435,7 +440,7 @@ fn slide_xml(off_x: i64, off_y: i64, ext_cx: i64, ext_cy: i64) -> String {
 <p:nvPr/>
 </p:nvPicPr>
 <p:blipFill>
-<a:blip r:embed="rId1"/>
+<a:blip r:embed="rId2"/>
 <a:stretch><a:fillRect/></a:stretch>
 </p:blipFill>
 <p:spPr>
@@ -445,7 +450,7 @@ fn slide_xml(off_x: i64, off_y: i64, ext_cx: i64, ext_cy: i64) -> String {
 </p:pic>
 </p:spTree>
 </p:cSld>
-<p:clrMapOvr><a:overrideClrMapping bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/></p:clrMapOvr>
+<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>
 </p:sld>"#
     )
 }
@@ -454,7 +459,8 @@ fn slide_rels_xml(n: usize) -> String {
     format!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image{n}.png"/>
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image{n}.png"/>
 </Relationships>"#
     )
 }

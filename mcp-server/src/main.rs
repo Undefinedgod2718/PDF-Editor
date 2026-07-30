@@ -7,8 +7,7 @@
 //!
 //! No PDF logic lives here or anywhere in this crate: every tool call is
 //! forwarded over HTTP to the PDF Editor backend (see `tools.rs`). The
-//! backend must already be running; see wiki/MCP.md and
-//! wiki/ADR-001-MCP.md for the design.
+//! backend must already be running.
 
 mod tools;
 

@@ -3,7 +3,7 @@
 //! coarse tile-based pixel diff, both burned into a copy of the "new"
 //! document as highlight/note annotations via `annots::create_on_doc`.
 //!
-//! Page alignment is index-based (v1 scope, see wiki/P13-Review.md): pages
+//! Page alignment is index-based (v1 scope): pages
 //! beyond the shorter document's page count are treated as pure
 //! insertions/deletions rather than content-matched. Visual diff only runs
 //! on page pairs where a text change was already detected, since a page

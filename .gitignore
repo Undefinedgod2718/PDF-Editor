@@ -3,27 +3,43 @@ node_modules/
 web/dist/
 server/target/
 target/
+# MCP server cargo build output (separate CARGO_TARGET_DIR to dodge global pollution)
+target-mcp/
+target-mcp-server/
+# Signed-MSI builds go here (build-msi.ps1 overrides CARGO_TARGET_DIR so the
+# artifact does not land in the machine-global target dir).
+target-msi/
 *.local
 
 # Runtime uploads
 server/data/
+# Desktop/local runtime document store (uploaded PDFs, actions, stamps)
+data/
 
-# Local pdfium binary (Linux dev; deploy scripts fetch their own)
+# Local pdfium binary (Linux)
 server/libpdfium.so
+
+# Tesseract OCR training data (~78MB combined; fetch via:
+# curl -fSL -o server/tessdata/eng.traineddata https://github.com/tesseract-ocr/tessdata/raw/main/eng.traineddata
+# curl -fSL -o server/tessdata/chi_tra.traineddata https://github.com/tesseract-ocr/tessdata/raw/main/chi_tra.traineddata
+server/tessdata/
 
 # Python sidecar venv / test artifacts
 python/.venv/
 python/.testout/
 **/.venv/
+**/__pycache__/
 
-# Deploy staging / Windows service helper (binaries, built dist)
-deploy/stage/
-deploy/**/*.exe
-deploy/.env
-
-# Docs (local only; deploy/README.md is tracked)
-/README.md
+# Internal-only trees — never publish (ops / wiki / private ADRs)
 wiki/
+docs/
+deploy/
+.gitea/
+release-msi/
+
+# Code-signing / updater secrets (pfx, private keys — never commit).
+# Track *.ps1 scripts under desktop/windows/certs/; only output/ is secret.
+desktop/windows/certs/output/
 
 # Agent tooling (not part of the product)
 .claude/

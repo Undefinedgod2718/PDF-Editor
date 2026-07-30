@@ -1,7 +1,7 @@
-//! Python sidecar invocation for PDF → Office (docx/xlsx) conversion.
+//! Python sidecar invocation for PDF → Office/Markdown (docx/xlsx/md) conversion.
 //!
 //! The sidecar is a uv-managed Python project (`python/convert.py`, pdf2docx +
-//! pdfplumber). Contract: single JSON line `{"ok":true,"pages":N}` on stdout /
+//! pdfplumber + MarkItDown). Contract: single JSON line `{"ok":true,"pages":N}` on stdout /
 //! exit 0, or `{"ok":false,"error":"..."}` as the LAST stderr line / exit != 0.
 //! Interpreter and script paths resolve from `PDF_EDITOR_PYTHON` /
 //! `PDF_EDITOR_SIDECAR` env vars, falling back to dev (`../python/.venv`) and
@@ -18,6 +18,9 @@ use tokio::process::Command;
 pub enum OfficeFormat {
     Docx,
     Xlsx,
+    /// Whole-document only — MarkItDown has no per-page API. Callers must
+    /// reject a non-empty page selection before reaching `convert`.
+    Markdown,
 }
 
 impl OfficeFormat {
@@ -25,11 +28,16 @@ impl OfficeFormat {
         match self {
             OfficeFormat::Docx => "docx",
             OfficeFormat::Xlsx => "xlsx",
+            OfficeFormat::Markdown => "markdown",
         }
     }
 
     pub fn ext(self) -> &'static str {
-        self.mode()
+        match self {
+            OfficeFormat::Docx => "docx",
+            OfficeFormat::Xlsx => "xlsx",
+            OfficeFormat::Markdown => "md",
+        }
     }
 
     pub fn content_type(self) -> &'static str {
@@ -40,6 +48,7 @@ impl OfficeFormat {
             OfficeFormat::Xlsx => {
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             }
+            OfficeFormat::Markdown => "text/markdown; charset=utf-8",
         }
     }
 }
