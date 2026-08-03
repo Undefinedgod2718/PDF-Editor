@@ -8,6 +8,11 @@
 #   - GenSenRoundedTW-R.ttf at server/fonts/
 #   - eng.traineddata / chi_tra.traineddata at server/tessdata/ (see .gitignore
 #     for the curl download commands)
+#   - python-embed/ built via desktop/windows/prepare-python-embed.ps1 — without
+#     it the MSI installs with no Python sidecar and every docx/xlsx/markdown
+#     export 500s at runtime as "conversion failed" (this shipped once already;
+#     `cargo tauri build` below now refuses to proceed without it, but this
+#     script fails faster and with a clearer message)
 #
 # This script runs npm ci + web build itself before the Tauri MSI bundle.
 
@@ -38,6 +43,11 @@ foreach ($Lang in @("eng", "chi_tra")) {
     if (-not (Test-Path $Tessdata)) {
         Write-Error "Missing $Tessdata — download it first, e.g.:`n  curl -fSL -o server\tessdata\$Lang.traineddata https://github.com/tesseract-ocr/tessdata/raw/main/$Lang.traineddata"
     }
+}
+
+$PythonEmbed = Join-Path $Root "python-embed\python.exe"
+if (-not (Test-Path $PythonEmbed)) {
+    Write-Error "Missing $PythonEmbed — build it first:`n  .\desktop\windows\prepare-python-embed.ps1"
 }
 
 # Bundled into the MSI via desktop/tauri.conf.json resources.
