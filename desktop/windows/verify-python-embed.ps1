@@ -34,6 +34,28 @@
 
 $ErrorActionPreference = 'Stop'
 
+# .NET directly, not Get-FileHash: on GitHub's windows-latest runner, the outer
+# `shell: pwsh` step spawns `powershell.exe` (Windows PowerShell 5.1, what
+# tauri's beforeBuildCommand actually invokes) as a nested child process that
+# inherits pwsh's $env:PSModulePath. That path doesn't include Windows
+# PowerShell's own module directory, so 5.1's command-not-found autoload never
+# finds Microsoft.PowerShell.Utility and Get-FileHash fails with "not
+# recognized" — nothing to do with this script's logic, and `Import-Module` by
+# name hits the same broken path resolution, so it isn't a fix either. Loading
+# System.Security.Cryptography via .NET sidesteps the module system entirely.
+# Reproduces only through that nested-shell path; a plain local
+# `powershell -File ...` run never hits it, which is what makes this worth a
+# comment instead of a silent one-liner swap.
+function Get-Sha256Hex([string]$Path) {
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $stream = [System.IO.File]::OpenRead($Path)
+        try {
+            -join ($sha.ComputeHash($stream) | ForEach-Object { $_.ToString('x2') })
+        } finally { $stream.Dispose() }
+    } finally { $sha.Dispose() }
+}
+
 # Everything below resolves off $PSScriptRoot, never the cwd, so running this by
 # hand from any directory behaves the same as the build hook.
 $repoRoot   = Resolve-Path (Join-Path $PSScriptRoot '..\..')
@@ -74,8 +96,8 @@ if (-not (Test-Path $embedPy)) {
 if (-not (Test-Path $sourcePy)) {
     Fail "python\convert.py is missing from the repo - cannot verify the bundled copy."
 }
-$srcHash   = (Get-FileHash $sourcePy -Algorithm SHA256).Hash
-$embedHash = (Get-FileHash $embedPy  -Algorithm SHA256).Hash
+$srcHash   = Get-Sha256Hex $sourcePy
+$embedHash = Get-Sha256Hex $embedPy
 if ($srcHash -ne $embedHash) {
     Fail "bundled convert.py does not match python\convert.py. The MSI would ship the OLD sidecar script - the build succeeds and the bug only shows up at runtime."
 }
