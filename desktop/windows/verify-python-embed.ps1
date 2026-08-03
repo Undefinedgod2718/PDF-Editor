@@ -105,9 +105,24 @@ if ($srcHash -ne $embedHash) {
 # ---- 3. dependencies actually import ----
 # No quotes inside -c: PowerShell strips embedded double quotes when handing an
 # argument to a native exe (this bit prepare-python-embed.ps1 once already).
+#
+# $ErrorActionPreference is downgraded for just this call because Windows
+# PowerShell 5.1 — specifically 5.1, not pwsh 7 — promotes ANY stderr line from
+# a native process into a terminating NativeCommandError when the preference is
+# 'Stop', regardless of the process's actual exit code. `2>$null` does not save
+# it: the promotion happens before the redirect target matters. This is exactly
+# what tripped GitHub's windows-msi runner: onnxruntime prints a benign
+# UserWarning ("Unsupported Windows version (2025server)...") to stderr on
+# import, on that OS specifically. The interpreter's own exit code is what
+# actually answers "did the import work", so that's what's checked below —
+# stderr noise from a healthy process must not fail the gate.
+$prevEap = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
 & $pythonExe -c 'import fitz, pdf2docx, pdfplumber, openpyxl, markitdown' 2>$null
-if ($LASTEXITCODE -ne 0) {
-    Fail "the bundled interpreter cannot import its dependencies (exit $LASTEXITCODE) - the tree is present but broken."
+$importExit = $LASTEXITCODE
+$ErrorActionPreference = $prevEap
+if ($importExit -ne 0) {
+    Fail "the bundled interpreter cannot import its dependencies (exit $importExit) - the tree is present but broken."
 }
 
 Write-Host "python sidecar bundle OK ($embedDir)" -ForegroundColor Green
