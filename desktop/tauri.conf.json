@@ -6,6 +6,7 @@
   "build": {
     "frontendDist": "../web/dist",
     "beforeDevCommand": "npm run dev --prefix ../web",
+    "beforeBuildCommand": "powershell -ExecutionPolicy Bypass -File desktop/windows/verify-python-embed.ps1",
     "devUrl": "http://localhost:5173"
   },
   "app": {
@@ -28,6 +29,7 @@
       "../server/fonts/SIL_Open_Font_License_1.1.txt": "fonts/SIL_Open_Font_License_1.1.txt",
       "../server/tessdata/eng.traineddata": "tessdata/eng.traineddata",
       "../server/tessdata/chi_tra.traineddata": "tessdata/chi_tra.traineddata",
+      "../python-embed/": "python/",
       "../target-mcp/release/pdf-editor-mcp-server.exe": "pdf-editor-mcp-server.exe",
       "windows/register-mcp.ps1": "register-mcp.ps1",
       "windows/unregister-mcp.ps1": "unregister-mcp.ps1"

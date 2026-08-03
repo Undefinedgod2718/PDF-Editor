@@ -30,6 +30,17 @@ python/.testout/
 **/.venv/
 **/__pycache__/
 
+# Embeddable Python runtime bundled into the Windows MSI (467 MB / ~9,900 files
+# — a build artifact, never a source). Regenerate with:
+#
+#   powershell -ExecutionPolicy Bypass -File desktop\windows\prepare-python-embed.ps1
+#
+# `tauri build` FAILS without it: tauri.conf.json maps ../python-embed/ into the
+# bundle as python/, which is where pdf-core/src/sidecar.rs looks for the
+# interpreter at runtime. Without it every docx/xlsx/markdown export returns a
+# generic 500 "conversion failed" — which is exactly how this got shipped once.
+python-embed/
+
 # Internal-only trees — never publish (ops / wiki / private ADRs)
 wiki/
 docs/
