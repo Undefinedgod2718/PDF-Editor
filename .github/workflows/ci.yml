@@ -68,6 +68,17 @@ jobs:
             $out = "server/tessdata/$lang.traineddata"
             curl.exe -fSL -o $out "https://github.com/tesseract-ocr/tessdata/raw/main/$lang.traineddata"
           }
+      - uses: astral-sh/setup-uv@v3
+      # Without this the MSI installs with no Python at all and every
+      # docx/xlsx/markdown export 500s at runtime as "conversion failed" — the
+      # bundle's own build gate (desktop/windows/verify-python-embed.ps1, run by
+      # `cargo tauri build` below) exists specifically to fail loud here instead
+      # of shipping that silently. uv is what pins the installed dependency
+      # versions to python/uv.lock; without it on PATH the script still works but
+      # warns and falls back to the loose pyproject.toml specs.
+      - name: Build embedded Python sidecar
+        shell: pwsh
+        run: .\desktop\windows\prepare-python-embed.ps1
       - name: Build MSI
         shell: pwsh
         run: .\scripts\build-msi.ps1

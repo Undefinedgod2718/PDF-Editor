@@ -4,8 +4,9 @@
 //! pdfplumber + MarkItDown). Contract: single JSON line `{"ok":true,"pages":N}` on stdout /
 //! exit 0, or `{"ok":false,"error":"..."}` as the LAST stderr line / exit != 0.
 //! Interpreter and script paths resolve from `PDF_EDITOR_PYTHON` /
-//! `PDF_EDITOR_SIDECAR` env vars, falling back to dev (`../python/.venv`) and
-//! deployment (`python/python.exe` embedded zip next to the exe cwd) layouts.
+//! `PDF_EDITOR_SIDECAR` env vars, else by probing dev (`../python/.venv`) and
+//! deployment (`python/python.exe`, the embeddable build) layouts under both
+//! the exe's own directory and the cwd — see `search_roots`.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -78,21 +79,58 @@ fn first_existing(candidates: &[PathBuf]) -> Option<PathBuf> {
     candidates.iter().find(|p| p.is_file()).cloned()
 }
 
+/// Roots that relative candidates are resolved against, in priority order:
+/// the directory holding the running executable, then the process cwd.
+///
+/// exe_dir has to be in here at all, and has to come first. Resolving a bare
+/// relative candidate uses only the cwd, which for a desktop install is
+/// whatever directory happened to launch the app — the Start Menu / desktop
+/// shortcuts pin it to INSTALLDIR (`WorkingDirectory` in
+/// desktop/windows/main.wxs), but the file association launches
+/// `"<exe>" "%1"` with no working directory, so opening a PDF by double-click
+/// inherits Explorer's cwd. Same install, same binary, and `python/python.exe`
+/// would resolve only on some launches — a far worse failure mode than never.
+///
+/// Mirrors `pdf::ocr::tessdata_dir`'s order (whose doc comment already claimed
+/// this function worked this way).
+fn search_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Some(exe_dir) = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf))
+    {
+        roots.push(exe_dir);
+    }
+    roots.push(PathBuf::from("."));
+    roots
+}
+
 fn resolve(env_var: &str, candidates: &[&str], what: &str) -> anyhow::Result<PathBuf> {
     if let Ok(p) = std::env::var(env_var) {
         let p = PathBuf::from(p);
         anyhow::ensure!(p.is_file(), "{env_var}={} does not exist", p.display());
         return Ok(p);
     }
-    let paths: Vec<PathBuf> = candidates.iter().map(PathBuf::from).collect();
+    let paths: Vec<PathBuf> = search_roots()
+        .iter()
+        .flat_map(|root| candidates.iter().map(|c| root.join(c)))
+        .collect();
     first_existing(&paths).ok_or_else(|| {
+        // List what was actually probed, not the bare candidate strings: the
+        // whole point of this resolution is that the same candidate means
+        // different files depending on the root, so "not found" is only
+        // actionable with the roots spelled out.
+        let tried: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
         anyhow::anyhow!(
             "sidecar {what} not found; set {env_var} or install one of: {}",
-            candidates.join(", ")
+            tried.join(", ")
         )
     })
 }
 
+// Each candidate below is tried under every root from `search_roots` — so
+// "cwd = server/" style notes describe the dev case, while the deployment case
+// is the same string resolved against the exe's own directory.
 fn resolve_python() -> anyhow::Result<PathBuf> {
     resolve(
         "PDF_EDITOR_PYTHON",
@@ -103,7 +141,9 @@ fn resolve_python() -> anyhow::Result<PathBuf> {
             // cwd = repo root
             "python/.venv/Scripts/python.exe",
             "python/.venv/bin/python",
-            // deployment: embedded Python zip at C:\PDFEditor\python
+            // deployment: embeddable Python next to the exe, built by
+            // desktop/windows/prepare-python-embed.ps1 and bundled into
+            // INSTALLDIR\python by tauri.conf.json's resources map.
             "python/python.exe",
         ],
         "python interpreter",
@@ -113,6 +153,8 @@ fn resolve_python() -> anyhow::Result<PathBuf> {
 fn resolve_script() -> anyhow::Result<PathBuf> {
     resolve(
         "PDF_EDITOR_SIDECAR",
+        // Deployment ships convert.py as a sibling of python.exe, so the
+        // second candidate covers INSTALLDIR\python\convert.py too.
         &["../python/convert.py", "python/convert.py"],
         "convert.py",
     )
@@ -199,4 +241,44 @@ pub async fn convert(
     });
     let _ = tokio::fs::remove_file(&out_path).await;
     Ok(bytes?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The exe's own directory must be probed, and probed before the cwd.
+    /// Dropping it regresses the desktop install to "markdown/docx export works
+    /// from the Start Menu shortcut but not when you double-click a PDF",
+    /// because only the shortcut pins the cwd to INSTALLDIR.
+    #[test]
+    fn search_roots_probes_exe_dir_first() {
+        let roots = search_roots();
+        let exe_dir = std::env::current_exe()
+            .expect("test binary has a path")
+            .parent()
+            .expect("test binary has a parent dir")
+            .to_path_buf();
+        assert_eq!(roots.first(), Some(&exe_dir), "exe dir must be probed first");
+        assert!(roots.contains(&PathBuf::from(".")), "cwd must still be probed");
+    }
+
+    /// A missing sidecar has to name the paths it actually probed — the whole
+    /// failure mode this resolution fixes is one candidate string meaning
+    /// different files under different roots.
+    #[test]
+    fn missing_sidecar_error_lists_probed_paths() {
+        let err = resolve(
+            "PDF_EDITOR_NONEXISTENT_TEST_VAR",
+            &["definitely/not/here.exe"],
+            "python interpreter",
+        )
+        .expect_err("nothing should resolve");
+        let msg = err.to_string();
+        let exe_dir = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+        assert!(
+            msg.contains(&exe_dir.join("definitely/not/here.exe").display().to_string()),
+            "error should name the exe-dir path it probed, got: {msg}"
+        );
+    }
 }
