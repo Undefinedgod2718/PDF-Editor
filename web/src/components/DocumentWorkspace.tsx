@@ -47,6 +47,10 @@ import CompareDialog from './CompareDialog'
 import FormBuilderBar, { type BuilderFieldType } from './FormBuilderBar'
 import FieldDialog from './FieldDialog'
 import ActionWizardDialog from './ActionWizardDialog'
+import OutlinePanel from './OutlinePanel'
+import LinkDialog from './LinkDialog'
+import WatermarkDialog from './WatermarkDialog'
+import HeaderFooterDialog from './HeaderFooterDialog'
 
 interface FlashTarget {
   page: number
@@ -85,6 +89,7 @@ export default function DocumentWorkspace({
   const [scale, setScale] = useState(1.25)
   const [currentPage, setCurrentPage] = useState(0)
   const [showThumbs, setShowThumbs] = useState(true)
+  const [showOutline, setShowOutline] = useState(false)
   const [showSearch, setShowSearch] = useState(false)
   // ---- 頂部工具分類頁籤（②b）----
   // 用 lazy initializer 讀 localStorage：只在這個 DocumentWorkspace 掛載那一刻讀一次，
@@ -137,6 +142,11 @@ export default function DocumentWorkspace({
 
   // ---- 平移（手形）模式相關狀態 ----
   const [panMode, setPanMode] = useState(false)
+
+  // ---- 連結模式 ----
+  // 跟密文一樣是跨頁的模式：每一頁都掛互動層，拉完框才彈對話框問目標。
+  const [linkMode, setLinkMode] = useState(false)
+  const [pendingLink, setPendingLink] = useState<{ page: number; rect: Rect } | null>(null)
 
   // ---- 表單建立相關狀態（Phase 14）----
   const [formBuilderMode, setFormBuilderMode] = useState(false)
@@ -474,6 +484,8 @@ export default function DocumentWorkspace({
         setRedactMode(false)
         setRedactBoxes([])
         setPanMode(false)
+        setLinkMode(false)
+        setPendingLink(null)
       } else {
         setCropRect(null)
       }
@@ -494,6 +506,8 @@ export default function DocumentWorkspace({
         setRedactMode(false)
         setRedactBoxes([])
         setPanMode(false)
+        setLinkMode(false)
+        setPendingLink(null)
       }
       resetImageInteraction()
       return next
@@ -512,6 +526,8 @@ export default function DocumentWorkspace({
         setRedactMode(false)
         setRedactBoxes([])
         setPanMode(false)
+        setLinkMode(false)
+        setPendingLink(null)
       } else {
         setPendingField(null)
         setEditingField(null)
@@ -533,6 +549,8 @@ export default function DocumentWorkspace({
         setPendingField(null)
         setEditingField(null)
         setPanMode(false)
+        setLinkMode(false)
+        setPendingLink(null)
       } else {
         setRedactBoxes([])
       }
@@ -558,15 +576,42 @@ export default function DocumentWorkspace({
         setEditingField(null)
         setRedactMode(false)
         setRedactBoxes([])
+        setLinkMode(false)
+        setPendingLink(null)
       }
       return next
     })
   }, [resetImageInteraction])
 
-  // 選工具時一定清掉 pan：ToolRail／AnnotToolbar 以前只 setTool，平移旗標還在，
-  // 畫面上看起來選了螢光但其實還在抓頁面拖（checklist B2）。
+  const toggleLinkMode = useCallback(() => {
+    setLinkMode((v) => {
+      const next = !v
+      if (next) {
+        setTool('select') // 連結模式時停用其他註解工具，避免 AnnotLayer 搶走指標事件
+        setCropMode(false)
+        setCropRect(null)
+        setImageMode(false)
+        resetImageInteraction()
+        setFormBuilderMode(false)
+        setPendingField(null)
+        setEditingField(null)
+        setRedactMode(false)
+        setRedactBoxes([])
+        setPanMode(false)
+      } else {
+        setPendingLink(null)
+      }
+      return next
+    })
+  }, [resetImageInteraction])
+
+  // 選工具時一定清掉 pan／連結：ToolRail／AnnotToolbar 以前只 setTool，平移旗標還在，
+  // 畫面上看起來選了螢光但其實還在抓頁面拖（checklist B2）。連結模式同理——它的互動層
+  // 蓋在 AnnotLayer 上面，不關掉的話選了螢光筆也畫不出東西。
   const selectTool = useCallback((t: AnnotTool) => {
     setPanMode(false)
+    setLinkMode(false)
+    setPendingLink(null)
     setTool(t)
   }, [])
 
@@ -636,6 +681,16 @@ export default function DocumentWorkspace({
           setRedactBoxes([])
           return
         }
+        if (linkMode) {
+          // 拉完框、對話框還開著時，先退掉那一步而不是整個模式——跟表單建立的
+          // pendingField 同一個道理。
+          if (pendingLink) {
+            setPendingLink(null)
+            return
+          }
+          setLinkMode(false)
+          return
+        }
         if (panMode) {
           setPanMode(false)
           return
@@ -663,6 +718,8 @@ export default function DocumentWorkspace({
     editingField,
     redactMode,
     panMode,
+    linkMode,
+    pendingLink,
     openMenu,
     activeDialog,
     showSearch,
@@ -688,6 +745,8 @@ export default function DocumentWorkspace({
         gotoPage={gotoPage}
         showThumbs={showThumbs}
         toggleThumbs={() => setShowThumbs((v) => !v)}
+        showOutline={showOutline}
+        toggleOutline={() => setShowOutline((v) => !v)}
         showSearch={showSearch}
         toggleSearch={() => setShowSearch((v) => !v)}
         openFile={onOpenFileNewTab}
@@ -702,6 +761,8 @@ export default function DocumentWorkspace({
         toggleImageMode={toggleImageMode}
         formBuilderMode={formBuilderMode}
         toggleFormBuilder={toggleFormBuilder}
+        linkMode={linkMode}
+        toggleLinkMode={toggleLinkMode}
         activeDialog={activeDialog}
         onToggleDialog={toggleDialog}
         redactMode={redactMode}
@@ -737,6 +798,15 @@ export default function DocumentWorkspace({
       </div>
       {error && <p className="error workspace-error">{error}</p>}
       <div className="workspace">
+        {showOutline && (
+          <OutlinePanel
+            doc={doc}
+            currentPage={currentPage}
+            gotoPage={gotoPage}
+            onChanged={() => setDirty(true)}
+            onClose={() => setShowOutline(false)}
+          />
+        )}
         {showThumbs && (
           <ThumbnailPanel
             doc={doc}
@@ -800,6 +870,9 @@ export default function DocumentWorkspace({
             redactBoxes={redactBoxes}
             onRedactAddBox={onRedactAddBox}
             panMode={panMode}
+            linkMode={linkMode}
+            onLinkCreateRect={(page, rect) => setPendingLink({ page, rect })}
+            onLinkChanged={bumpPageVersion}
           />
         </div>
         {cropMode && (
@@ -872,6 +945,15 @@ export default function DocumentWorkspace({
             rectPt={pendingField.rect}
             onClose={() => setPendingField(null)}
             onCreated={onBuilderFieldsChanged}
+          />
+        )}
+        {pendingLink && (
+          <LinkDialog
+            doc={doc}
+            page={pendingLink.page}
+            rectPt={pendingLink.rect}
+            onClose={() => setPendingLink(null)}
+            onCreated={() => bumpPageVersion(pendingLink.page)}
           />
         )}
         {editingField && (
@@ -970,6 +1052,22 @@ export default function DocumentWorkspace({
           />
         )}
         {activeDialog === 'encrypt' && <EncryptDialog doc={doc} onClose={() => closeDialog('encrypt')} />}
+        {/* 浮水印／頁首頁尾是就地改寫本文件（不像壓縮／OCR 產出新文件），套用後
+            走 refreshDocStructure 讓每一頁的渲染圖重抓。 */}
+        {activeDialog === 'watermark' && (
+          <WatermarkDialog
+            doc={doc}
+            onClose={() => closeDialog('watermark')}
+            onApplied={() => void refreshDocStructure()}
+          />
+        )}
+        {activeDialog === 'headerFooter' && (
+          <HeaderFooterDialog
+            doc={doc}
+            onClose={() => closeDialog('headerFooter')}
+            onApplied={() => void refreshDocStructure()}
+          />
+        )}
         {activeDialog === 'actionWizard' && (
           <ActionWizardDialog
             onClose={() => closeDialog('actionWizard')}
