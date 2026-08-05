@@ -11,6 +11,7 @@ import FormLayer from './FormLayer'
 import CropLayer from './CropLayer'
 import ImageLayer from './ImageLayer'
 import RedactLayer from './RedactLayer'
+import LinkLayer from './LinkLayer'
 import FormBuilderLayer from './FormBuilderLayer'
 import TextLineLayer from './TextLineLayer'
 import type { AnnotTool } from './AnnotToolbar'
@@ -72,6 +73,12 @@ interface Props {
   onRedactAddBox: (page: number, rectPt: Rect) => void
   /** 平移（手形）模式是否啟用（Toolbar 按鈕）——拖曳捲動檢視區，停用底下各層互動。 */
   panMode: boolean
+  /** 連結模式是否啟用（Toolbar「🔗」按鈕）——可跨頁，每頁都顯示互動層。 */
+  linkMode: boolean
+  /** 在某頁拉出新連結範圍（view-space points），由上層開對話框問目標。 */
+  onLinkCreateRect: (page: number, rectPt: Rect) => void
+  /** 該頁連結被刪除後回呼。 */
+  onLinkChanged: (page: number) => void
 }
 
 export interface ViewerHandle {
@@ -113,6 +120,9 @@ const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(
     redactBoxes,
     onRedactAddBox,
     panMode,
+    linkMode,
+    onLinkCreateRect,
+    onLinkChanged,
   },
   ref,
 ) {
@@ -305,6 +315,16 @@ const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(
                 insertArmed={insertArmed}
                 insertNaturalPt={insertNaturalPt}
                 onInsertRectChange={onInsertRectChange}
+              />
+            )}
+            {linkMode && (
+              <LinkLayer
+                docId={doc.id}
+                page={page.index}
+                scale={scale}
+                version={pageVersions[page.index] ?? 0}
+                onCreateRect={(rectPt) => onLinkCreateRect(page.index, rectPt)}
+                onChanged={() => onLinkChanged(page.index)}
               />
             )}
             {redactMode && (

@@ -11,8 +11,8 @@ use uuid::Uuid;
 
 use crate::actions;
 use crate::pdf::{
-    annots, compare, compress, exportops, fingerprint, formbuild, formops, imageops, objects, ocr,
-    ops, pageops, protect, redact, textedit,
+    annots, compare, compress, exportops, fingerprint, formbuild, formops, imageops, links, objects,
+    ocr, ops, outline, pageops, protect, redact, stamptext, textedit,
 };
 use crate::sidecar;
 use crate::storage;
@@ -126,6 +126,23 @@ pub fn router() -> Router<SharedState> {
                 .patch(update_form_field)
                 .delete(delete_form_field),
         )
+        .route(
+            "/api/documents/{id}/outline",
+            get(list_outline).put(set_outline),
+        )
+        .route(
+            "/api/documents/{id}/pages/{page}/links",
+            get(list_links).post(create_link),
+        )
+        .route(
+            "/api/documents/{id}/pages/{page}/links/{index}",
+            axum::routing::delete(delete_link),
+        )
+        .route("/api/documents/{id}/watermark", post(apply_watermark))
+        .route(
+            "/api/documents/{id}/header-footer",
+            post(apply_header_footer),
+        )
         .route("/api/stamps", post(upload_stamp).get(list_stamps))
         .route(
             "/api/stamps/{id}",
@@ -200,6 +217,23 @@ fn is_client_error(msg: &str) -> bool {
         "cannot recolour",
         // annots::set_rect — 標記類的位置綁在它覆蓋的文字上，不能自由拖拉。
         "cannot move this annotation type",
+        // outline::set — 送上來的書籤樹本身不合法（空標題／過深／過多）。
+        "bookmark title",
+        "bookmark tree",
+        // links — 目標網址不合規、框太小或太大、指到的不是連結。
+        "link url",
+        "link rect",
+        "is not a link",
+        "page has no annotations",
+        // stamptext — 浮水印／頁首頁尾的參數超出可用範圍。
+        "watermark text",
+        "watermark opacity",
+        "watermark rotation",
+        "font size must be between",
+        "header/footer",
+        "no printable characters",
+        "has no glyphs for this text",
+        "document has no pages",
     ];
     MARKERS.iter().any(|m| msg.contains(m))
 }
@@ -766,6 +800,139 @@ async fn delete_form_field(
         })
         .await
         .map_err(map_formbuild_err)?;
+    let revision = state.storage.bump_revision(id)?;
+    Ok(Json(serde_json::json!({ "ok": true, "revision": revision })))
+}
+
+// ---------------------------------------------------------------------------
+// Outline (bookmarks), links, and bulk text stamps
+//
+// These all do lopdf dictionary surgery rather than going through PDFium, but
+// they still run on the engine thread: it serializes them against every other
+// mutation and is where the document cache gets invalidated.
+// ---------------------------------------------------------------------------
+
+async fn list_outline(
+    State(state): State<SharedState>,
+    Path(id): Path<Uuid>,
+) -> Result<impl IntoResponse, ApiError> {
+    state.storage.get(id).ok_or_else(not_found)?;
+    let path = state.storage.pdf_path(id);
+    let items = state
+        .engine
+        .run(move |_pdfium, _cache| outline::list(&path))
+        .await?;
+    Ok(Json(items))
+}
+
+#[derive(Deserialize)]
+struct OutlineBody {
+    items: Vec<outline::NewOutlineItem>,
+}
+
+async fn set_outline(
+    State(state): State<SharedState>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<OutlineBody>,
+) -> Result<impl IntoResponse, ApiError> {
+    state.storage.get(id).ok_or_else(not_found)?;
+    let path = state.storage.pdf_path(id);
+    state
+        .engine
+        .run(move |_pdfium, cache| {
+            outline::set(&path, &body.items)?;
+            cache.invalidate(&path);
+            Ok(())
+        })
+        .await?;
+    let revision = state.storage.bump_revision(id)?;
+    Ok(Json(serde_json::json!({ "ok": true, "revision": revision })))
+}
+
+async fn list_links(
+    State(state): State<SharedState>,
+    Path((id, page)): Path<(Uuid, u16)>,
+) -> Result<impl IntoResponse, ApiError> {
+    state.storage.get(id).ok_or_else(not_found)?;
+    let path = state.storage.pdf_path(id);
+    let items = state
+        .engine
+        .run(move |_pdfium, _cache| links::list(&path, page))
+        .await?;
+    Ok(Json(items))
+}
+
+async fn create_link(
+    State(state): State<SharedState>,
+    Path((id, page)): Path<(Uuid, u16)>,
+    Json(body): Json<links::NewLink>,
+) -> Result<impl IntoResponse, ApiError> {
+    state.storage.get(id).ok_or_else(not_found)?;
+    let path = state.storage.pdf_path(id);
+    state
+        .engine
+        .run(move |_pdfium, cache| {
+            links::create(&path, page, &body)?;
+            cache.invalidate(&path);
+            Ok(())
+        })
+        .await?;
+    let revision = state.storage.bump_revision(id)?;
+    Ok(Json(serde_json::json!({ "ok": true, "revision": revision })))
+}
+
+async fn delete_link(
+    State(state): State<SharedState>,
+    Path((id, page, index)): Path<(Uuid, u16, usize)>,
+) -> Result<impl IntoResponse, ApiError> {
+    state.storage.get(id).ok_or_else(not_found)?;
+    let path = state.storage.pdf_path(id);
+    state
+        .engine
+        .run(move |_pdfium, cache| {
+            links::delete(&path, page, index)?;
+            cache.invalidate(&path);
+            Ok(())
+        })
+        .await?;
+    let revision = state.storage.bump_revision(id)?;
+    Ok(Json(serde_json::json!({ "ok": true, "revision": revision })))
+}
+
+async fn apply_watermark(
+    State(state): State<SharedState>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<stamptext::WatermarkOptions>,
+) -> Result<impl IntoResponse, ApiError> {
+    state.storage.get(id).ok_or_else(not_found)?;
+    let path = state.storage.pdf_path(id);
+    state
+        .engine
+        .run(move |_pdfium, cache| {
+            stamptext::watermark(&path, &body)?;
+            cache.invalidate(&path);
+            Ok(())
+        })
+        .await?;
+    let revision = state.storage.bump_revision(id)?;
+    Ok(Json(serde_json::json!({ "ok": true, "revision": revision })))
+}
+
+async fn apply_header_footer(
+    State(state): State<SharedState>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<stamptext::HeaderFooterOptions>,
+) -> Result<impl IntoResponse, ApiError> {
+    state.storage.get(id).ok_or_else(not_found)?;
+    let path = state.storage.pdf_path(id);
+    state
+        .engine
+        .run(move |_pdfium, cache| {
+            stamptext::header_footer(&path, &body)?;
+            cache.invalidate(&path);
+            Ok(())
+        })
+        .await?;
     let revision = state.storage.bump_revision(id)?;
     Ok(Json(serde_json::json!({ "ok": true, "revision": revision })))
 }

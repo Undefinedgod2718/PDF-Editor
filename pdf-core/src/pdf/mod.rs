@@ -1,6 +1,8 @@
 pub mod annots;
 pub mod compare;
 pub mod compress;
+mod docutil;
+pub mod embedfont;
 pub mod engine;
 pub mod exportops;
 pub mod fingerprint;
@@ -8,13 +10,16 @@ pub mod font;
 pub mod formbuild;
 pub mod formops;
 pub mod imageops;
+pub mod links;
 pub mod objects;
 pub mod ocr;
 pub mod ops;
+pub mod outline;
 
 pub mod pageops;
 pub mod protect;
 pub mod redact;
+pub mod stamptext;
 pub mod textedit;
 
 use std::path::Path;

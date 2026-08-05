@@ -3,7 +3,7 @@ import { downloadUrl, type AppMode, type DocInfo } from '../api'
 import ToolMenu, { ToolMenuItem } from './ToolMenu'
 import type { ToolTabId } from './ToolTabs'
 
-/** 文件工具下拉裡「開對話框」類的七個項目；同時最多一個開著，由 DocumentWorkspace 的
+/** 文件工具下拉裡「開對話框」類的項目；同時最多一個開著，由 DocumentWorkspace 的
  *  activeDialog 統一管理。redactMode 不算在內——它是工具模式，不是對話框。 */
 export type DialogKind =
   | 'export'
@@ -16,6 +16,8 @@ export type DialogKind =
   | 'compare'
   | 'merge'
   | 'extract'
+  | 'watermark'
+  | 'headerFooter'
 
 interface Props {
   doc: DocInfo
@@ -28,6 +30,8 @@ interface Props {
   gotoPage: (p: number) => void
   showThumbs: boolean
   toggleThumbs: () => void
+  showOutline: boolean
+  toggleOutline: () => void
   showSearch: boolean
   toggleSearch: () => void
   openFile: (f: File) => void
@@ -42,6 +46,8 @@ interface Props {
   toggleImageMode: () => void
   formBuilderMode: boolean
   toggleFormBuilder: () => void
+  linkMode: boolean
+  toggleLinkMode: () => void
   activeDialog: DialogKind | null
   onToggleDialog: (kind: DialogKind) => void
   redactMode: boolean
@@ -78,6 +84,8 @@ export default function Toolbar({
   gotoPage,
   showThumbs,
   toggleThumbs,
+  showOutline,
+  toggleOutline,
   showSearch,
   toggleSearch,
   openFile,
@@ -92,6 +100,8 @@ export default function Toolbar({
   toggleImageMode,
   formBuilderMode,
   toggleFormBuilder,
+  linkMode,
+  toggleLinkMode,
   activeDialog,
   onToggleDialog,
   redactMode,
@@ -230,6 +240,13 @@ export default function Toolbar({
               🗂
             </button>
             <button
+              className={`tb-btn ${showOutline ? 'active' : ''}`}
+              title="書籤（大綱）"
+              onClick={toggleOutline}
+            >
+              🔖
+            </button>
+            <button
               className="tb-btn"
               title="上一頁"
               disabled={currentPage <= 0}
@@ -328,6 +345,36 @@ export default function Toolbar({
             >
               📝
             </button>
+            {/* 連結是模式型工具（進入後在頁面上拉框），照這一列的慣例留裸按鈕。 */}
+            <button
+              className={`tb-btn ${linkMode ? 'active' : ''}`}
+              title="連結（拉框建立跳頁或網址連結）"
+              onClick={toggleLinkMode}
+            >
+              🔗
+            </button>
+          </div>
+          <div className="toolbar-group">
+            {menu(
+              'stamptext',
+              '浮水印/頁首頁尾',
+              activeDialog === 'watermark' || activeDialog === 'headerFooter',
+              <>
+                <ToolMenuItem
+                  onSelect={() => onToggleDialog('watermark')}
+                  active={activeDialog === 'watermark'}
+                >
+                  浮水印…
+                </ToolMenuItem>
+                <ToolMenuItem
+                  onSelect={() => onToggleDialog('headerFooter')}
+                  active={activeDialog === 'headerFooter'}
+                  title="頁首頁尾與自動頁碼"
+                >
+                  頁首頁尾與頁碼…
+                </ToolMenuItem>
+              </>,
+            )}
           </div>
           {/* 頁面操作（②d）：目前 ThumbnailPanel 內縮圖按鈕是唯一入口，關掉縮圖面板就完全碰不到——
               這裡補一份作用在 currentPage 上的入口。重排維持拖放縮圖，這裡只負責開面板。

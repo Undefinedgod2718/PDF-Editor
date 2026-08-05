@@ -2294,3 +2294,195 @@ body[data-fullscreen="true"] .tool-menu-pop {
     page-break-after: auto;
   }
 }
+
+/* ---------- 書籤（大綱）面板 ---------- */
+/* 版面比照 .search-panel：固定寬度的側欄，但貼在左邊（跟縮圖同側），
+   因為書籤是導覽用的，跟搜尋結果那種「查完就關」的性質不同。 */
+.outline-panel {
+  width: 300px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+}
+
+.outline-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+}
+
+.outline-header span {
+  flex: 1;
+}
+
+.outline-error {
+  margin: 8px 10px 0;
+  font-size: 12px;
+  color: #ff6b6b;
+}
+
+.outline-list {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.outline-empty {
+  padding: 16px 12px;
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+
+.outline-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.outline-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.outline-row.active {
+  background: rgba(76, 141, 255, 0.2);
+}
+
+.outline-title {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.outline-title:focus {
+  border-color: var(--border);
+  background: var(--bg-dark);
+  outline: none;
+}
+
+.outline-page {
+  width: 52px;
+  flex: 0 0 auto;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-dark);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.outline-actions,
+.outline-footer {
+  display: flex;
+  gap: 4px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+}
+
+.outline-footer {
+  justify-content: flex-end;
+}
+
+/* ---------- 連結層 ---------- */
+.link-layer {
+  position: absolute;
+  inset: 0;
+  cursor: crosshair;
+  pointer-events: auto;
+}
+
+.link-rect {
+  position: absolute;
+  border: 1px solid var(--accent);
+  background: rgba(76, 141, 255, 0.14);
+}
+
+/* 標籤與刪除鈕只在滑過時出現：連結框常常疊在文字上，常駐標籤會蓋住內容。 */
+.link-label {
+  position: absolute;
+  left: 0;
+  top: -18px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.link-rect:hover .link-label {
+  opacity: 1;
+}
+
+.link-delete {
+  position: absolute;
+  right: -8px;
+  top: -8px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.link-rect:hover .link-delete {
+  opacity: 1;
+}
+
+.link-drag-preview {
+  border-style: dashed;
+  pointer-events: none;
+}
+
+/* ---------- 浮水印／頁首頁尾對話框 ---------- */
+.stamp-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.stamp-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.hf-slot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hf-slot-label {
+  flex: 0 0 56px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.hf-slot .modal-input {
+  flex: 1;
+  min-width: 0;
+}

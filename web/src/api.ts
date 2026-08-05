@@ -1335,3 +1335,139 @@ export function actionRunFileUrl(runId: string, index: number): string {
 export function actionRunDownloadUrl(runId: string): string {
   return `/api/actions/runs/${runId}/download`
 }
+
+// ---------------------------------------------------------------------------
+// 書籤（大綱）
+// ---------------------------------------------------------------------------
+
+/** 後端讀到的一個書籤節點。 */
+export interface OutlineItem {
+  title: string
+  /** 目標頁（0-based）；來源檔的目的地解析不出來時為 null。 */
+  page: number | null
+  /** 是否預設展開（PDF /Count 為正）。 */
+  open: boolean
+  children: OutlineItem[]
+}
+
+/** 寫回時的節點；page 一定要指定，所以跟 OutlineItem 分開兩個型別。 */
+export interface NewOutlineItem {
+  title: string
+  page: number
+  open: boolean
+  children: NewOutlineItem[]
+}
+
+export async function fetchOutline(id: string): Promise<OutlineItem[]> {
+  const res = await fetch(`/api/documents/${id}/outline`)
+  return jsonOrThrow(res)
+}
+
+/** 整棵樹一次寫回（後端就是整棵重建）；傳空陣列等於刪掉整份書籤。 */
+export async function saveOutline(id: string, items: NewOutlineItem[]): Promise<Mutated> {
+  const res = await fetch(`/api/documents/${id}/outline`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items }),
+  })
+  return jsonOrThrow(res)
+}
+
+// ---------------------------------------------------------------------------
+// 連結
+// ---------------------------------------------------------------------------
+
+/** 連結目標：站內跳頁、外部網址，或後端看得到但描述不了的其他動作。 */
+export type LinkTarget =
+  | { target: 'page'; page: number }
+  | { target: 'uri'; url: string }
+  | { target: 'other' }
+
+/** index 是該頁 /Annots 陣列中的位置，刪除時要用它；該頁註解一有增刪就要重抓。 */
+export type LinkInfo = { index: number; rect: Rect } & LinkTarget
+
+export type NewLinkTarget = { target: 'page'; page: number } | { target: 'uri'; url: string }
+
+export async function listLinks(id: string, page: number): Promise<LinkInfo[]> {
+  const res = await fetch(`/api/documents/${id}/pages/${page}/links`)
+  return jsonOrThrow(res)
+}
+
+export async function createLink(
+  id: string,
+  page: number,
+  rect: Rect,
+  target: NewLinkTarget,
+): Promise<Mutated> {
+  const res = await fetch(`/api/documents/${id}/pages/${page}/links`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rect, ...target }),
+  })
+  return jsonOrThrow(res)
+}
+
+export async function deleteLink(id: string, page: number, index: number): Promise<Mutated> {
+  const res = await fetch(`/api/documents/${id}/pages/${page}/links/${index}`, {
+    method: 'DELETE',
+  })
+  return jsonOrThrow(res)
+}
+
+// ---------------------------------------------------------------------------
+// 浮水印／頁首頁尾
+// ---------------------------------------------------------------------------
+
+export interface WatermarkOptions {
+  text: string
+  /** 0-based 頁碼；空陣列＝全部套用。 */
+  pages: number[]
+  fontSize: number
+  /** 0.05–1.0。 */
+  opacity: number
+  color: { r: number; g: number; b: number }
+  /** 逆時針角度，45 為慣用的斜向。 */
+  rotation: number
+  /** 壓在頁面內容底下（文字才看得清楚）。 */
+  behind: boolean
+}
+
+export async function applyWatermark(id: string, opts: WatermarkOptions): Promise<Mutated> {
+  const res = await fetch(`/api/documents/${id}/watermark`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(opts),
+  })
+  return jsonOrThrow(res)
+}
+
+export interface HeaderFooterOptions {
+  headerLeft: string
+  headerCenter: string
+  headerRight: string
+  footerLeft: string
+  footerCenter: string
+  footerRight: string
+  /** 0-based 頁碼；空陣列＝全部套用。 */
+  pages: number[]
+  fontSize: number
+  color: { r: number; g: number; b: number }
+  /** 文字距頁緣的距離（點）。 */
+  margin: number
+  /** 文件第一頁要顯示的頁碼。 */
+  startNumber: number
+  /**
+   * {date} 要展開成什麼。由前端帶上去而不是後端讀時鐘——時區與日期格式
+   * 是瀏覽器才知道的事。
+   */
+  date: string
+}
+
+export async function applyHeaderFooter(id: string, opts: HeaderFooterOptions): Promise<Mutated> {
+  const res = await fetch(`/api/documents/${id}/header-footer`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(opts),
+  })
+  return jsonOrThrow(res)
+}
